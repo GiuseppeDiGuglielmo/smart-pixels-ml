@@ -13,3 +13,8 @@ clean:
 	rm -f tb_input_features.dat
 	rm -f tb_output_predictions.dat
 .PHONY: clean
+
+ultraclean: clean
+	rm -rf .ipynb_checkpoints
+	rm -rf __pycache__
+.PHONY: ultraclean
