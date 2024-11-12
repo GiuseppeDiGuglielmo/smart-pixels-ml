@@ -2,8 +2,11 @@ help:
 	@echo "INFO: make <tab> for targets"
 .PHONY: help
 
+PYTHONPATH ?= "${MGC_HOME}/shared/pkgs/ccs_hls4ml/hls4ml jupyter-lab"
+
 jupyter-lab:
-	PYTHONPATH=${MGC_HOME}/shared/pkgs/ccs_hls4ml/hls4ml jupyter-lab
+	PYTHONPATH=${PYTHONPATH} jupyter-lab
+	#PYTHONPATH=/home/giuseppe/research/projects/siemens/catapult_compare_releases/hls4ml_dgburnette jupyter-lab
 .PHONY: jupyter-lab
 
 clean:
