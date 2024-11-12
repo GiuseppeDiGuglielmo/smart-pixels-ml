@@ -9,6 +9,10 @@ jupyter-lab:
 	#PYTHONPATH=/home/giuseppe/research/projects/siemens/catapult_compare_releases/hls4ml_dgburnette jupyter-lab
 .PHONY: jupyter-lab
 
+backup:
+	tar cvfz backup_$$(date +%Y%m%d_%H%M%S).tar.gz npy/ tfrecords/ weights/ qkeras.png comparison_qkeras_hls4m.png *dat
+.PHONY: backup
+
 clean:
 	rm -f *_config.yml
 	rm -f *_prj.tar.gz
