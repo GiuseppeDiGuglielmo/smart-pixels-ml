@@ -8,7 +8,7 @@ import tensorflow as tf
 from tensorflow.keras import datasets, layers, models
 
 def var_network(var, hidden=10, output=2):
-    var = Flatten(name="flatten")(var)
+    var = Flatten(name="flatten_var")(var)
     var = QDense(
         hidden,
         kernel_quantizer=quantized_bits(8, 0, alpha=1),
@@ -39,18 +39,18 @@ def var_network(var, hidden=10, output=2):
 
 def mlp_encoder_network(var, hidden=16, hidden_dimx=16, hidden_dimy=16):
     proj_x = AveragePooling2D(
-        pool_size=(1, 21), 
-        strides=None, 
-        padding="valid", 
-        data_format=None,        
+        pool_size=(1, hidden_dimx),
+        strides=None,
+        padding="valid",
+        data_format=None,
     )(var)
     proj_x = Flatten()(proj_x)
 
     proj_y = AveragePooling2D(
-        pool_size=(13, 1), 
-        strides=None, 
-        padding="valid", 
-        data_format=None,        
+        pool_size=(hidden_dimy, 1),
+        strides=None,
+        padding="valid",
+        data_format=None,
     )(var)
     proj_y = Flatten()(proj_y)
 
@@ -61,7 +61,7 @@ def mlp_encoder_network(var, hidden=16, hidden_dimx=16, hidden_dimy=16):
         kernel_regularizer=tf.keras.regularizers.L1L2(0.01),
         activity_regularizer=tf.keras.regularizers.L2(0.01),
     )(proj_x)
-    proj_x = QActivation("quantized_relu(bits=13, integer=5)(x)")(var)
+    proj_x = QActivation("quantized_relu(bits=13, integer=5)")(proj_x)
 
     proj_y = QDense(
         hidden_dimy,
@@ -70,7 +70,7 @@ def mlp_encoder_network(var, hidden=16, hidden_dimx=16, hidden_dimy=16):
         kernel_regularizer=tf.keras.regularizers.L1L2(0.01),
         activity_regularizer=tf.keras.regularizers.L2(0.01),
     )(proj_y)
-    proj_y = QActivation("quantized_relu(bits=13, integer=5)(x)")(var)
+    proj_y = QActivation("quantized_relu(bits=13, integer=5)")(proj_y)
 
     var = Concatenate(axis=1)([proj_x, proj_y])
 
