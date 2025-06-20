@@ -3,18 +3,18 @@ import tensorflow_probability as tfp
 
 # custom loss function
 def custom_loss(y, p_base, minval=1e-9, maxval=1e9, scale = 512):
-    
+
     p = p_base
-    
+
     mu = p[:, 0:8:2]
-    
+
     # creating each matrix element in 4x4
     Mdia = minval + tf.math.maximum(p[:, 1:8:2], 0.0)
     Mcov = p[:,8:]
-    
+
     # placeholder zero element
     zeros = tf.zeros_like(Mdia[:,0])
-    
+
     # assembles scale_tril matrix
     row1 = tf.stack([Mdia[:,0],zeros,zeros,zeros])
     row2 = tf.stack([Mcov[:,0],Mdia[:,1],zeros,zeros])
@@ -23,11 +23,51 @@ def custom_loss(y, p_base, minval=1e-9, maxval=1e9, scale = 512):
 
     scale_tril = tf.transpose(tf.stack([row1,row2,row3,row4]),perm=[2,0,1])
 
-    dist = tfp.distributions.MultivariateNormalTriL(loc = mu, scale_tril = scale_tril) 
-    
-    likelihood = dist.prob(y)  
+    dist = tfp.distributions.MultivariateNormalTriL(loc = mu, scale_tril = scale_tril)
+
+    likelihood = dist.prob(y)
     likelihood = tf.clip_by_value(likelihood,minval,maxval)
 
     NLL = -1*tf.math.log(likelihood)
 
-    return tf.keras.backend.sum(NLL) 
+    return tf.keras.backend.sum(NLL)
+
+
+# custom sse loss function for "slim" model
+def custom_sse_loss(y, p_base, minval=1e-9, maxval=1e9):
+
+    # truth values
+    x_true = y[:,0]
+    y_true = y[:,1]
+    cotB_true = y[:,2]
+
+    # predictions
+    p = p_base
+    x_pred = p[:,0]
+    y_pred = p[:,1]
+    cotB_pred = p[:,2]
+
+    sse_x = tf.reduce_sum(tf.square(x_true - x_pred))
+    sse_y = tf.reduce_sum(tf.square(y_true - y_pred))
+    sse_cotB = tf.reduce_sum(tf.square(cotB_true - cotB_pred))
+
+    return (sse_x + sse_y + sse_cotB) / 3.0
+
+
+# custom mse loss function for "slim" model
+def custom_mse_loss(y, p_base, minval=1e-9, maxval=1e9):
+
+    # truth values
+    x_true = y[:,0]
+    y_true = y[:,1]
+    cotB_true = y[:,2]
+
+    # predictions
+    p = p_base
+    x_pred = p[:,0]
+    y_pred = p[:,1]
+    cotB_pred = p[:,2]
+
+    loss = keras.losses.mean_squared_error(y[:,0:2], p[:, 0:2])
+
+    return loss
