@@ -1,3 +1,23 @@
 .ipynb_checkpoints
 __pycache__
-config.json
+*_config.yml
+*_prj.tar.gz
+ *_prj
+*tb_input_features.dat
+*tb_output_predictions.dat
+*debug.hdf5
+*debug.json
+*debug.keras
+*model.png
+*qkeras.png
+*animation.gif
+*comparison_qkeras_hls4ml.jpeg
+BKP_*
+Catapult*
+*_prj
+tfrecords
+weights
+npy
+runme.sh
+envsetup.sh
+.vscode
