@@ -1,18 +1,19 @@
-# python imports
-import tensorflow as tf
-from qkeras import quantized_bits
-from typing import Union, List, Tuple
+import os
+import gc
+import math
 import glob
+import random
+import logging
+import datetime
 import numpy as np
 import pandas as pd
-import math
+
+from typing import Union, List, Tuple
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+
 from tqdm import tqdm
-import os
-import datetime
-import random 
-import logging
-import gc
+import tensorflow as tf
+from qkeras import quantized_bits
 
 from . import utils
 
@@ -35,25 +36,31 @@ def QKeras_data_prep_quantizer(data, bits=4, int_bits=0, alpha=1):
     return quantizer(data)
 
 
+def split_df_to_X_y_df(df: pd.DataFrame,
+                       input_shape: Tuple[int, int, int],
+                       labels_list: List[str],
+                       recon_cols: List[int]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+
+    X_df = df[recon_cols].copy()
+    y_df = df[labels_list].copy()
+
+    return X_df, y_df
+
+
+
 class OptimizedDataGenerator(tf.keras.utils.Sequence):
     def __init__(self, 
-            data_directory_path: str = "./",
-            labels_directory_path: str = "./",
+            dataset_base_dir: str = "./",
             is_directory_recursive: bool = False,
-            file_type: str = "csv",
-            data_format: str = "2D",
             batch_size: int = 32,
             file_count = None,
             labels_list: Union[List,str] = "cotAlpha",
-            scaling_list: Union[List,float] = [75.0, 18.75, 10.0, 1.22],
             to_standardize: bool = False,
             input_shape: Tuple = (13,21),
             transpose = None,
             include_y_local: bool = False,
             files_from_end = False,
             shuffle=False,
-            current=False,
-            sample_delta_t=200,
 
             # Added in Optimized datagenerators 
             load_from_tfrecords_dir: str = None,
@@ -67,87 +74,55 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
             ):
         super().__init__() 
 
-        """
-        Data Generator to streamline data input to the network direct from the directory.
-        Args:
-        data_directory_path:
-        labels_directory_path: 
-        is_directory_recursive: 
-        file_type: Default: "csv"
-                   Adapt the data loader according to file type. For now, it only supports csv and parquet file formats.
-        data_format: Default: 2D
-                     Used to refer to the relevant "recon" files, 2D for 2D pixel array, 3D for time series input,
-        batch_size: Default: 32
-                    The no. of data points to be included in a single batch.
-        file_count: Default: None
-                    To limit the no. of .csv files to be used for training.
-                    If set to None, all files will be considered as legitimate inputs.
-        labels_list: Default: "cotAlpha"
-                     Input column name or list of column names to be used as label input to the neural network.
-        to_standardize: If set to True, it ensures that batches are normalized prior to being used as inputs
-                        for training.
-                        Default: False
-        input_shape: Default: (13,21) for image input to a 2D feedforward neural network.
-                    To reshape the input array per the requirements of the network training.
-        current: Default False, calculate the current instead of the integrated charge
-        sample_delta_t: how long an "ADC bin" is in picoseconds
-        
-        load_from_tfrecords_dir: Directory to load prepared data from TFRecords.
-        tfrecords_dir: Directory to save TFRecords.
-        use_time_stamps: which of the 20 time stamps to train on. default -1 is to train on all of them
-        seed: Random seed for shuffling.
-        quantize: Whether to quantize the data.
-        """
-
-
-        # decide on which time stamps to load
-        self.use_time_stamps = np.arange(0,20) if use_time_stamps == -1 else use_time_stamps
-        len_xy, ntime = 13*21, 20
-        idx = [[i*(len_xy),(i+1)*(len_xy)] for i in range(ntime)] # 20 time stamps of length 13*21
-        self.use_time_stamps = np.array([ np.arange(idx[i][0], idx[i][1]).astype("str") for i in self.use_time_stamps]).flatten().tolist()
-        if use_time_stamps != -1 and data_format != '2D':
-            assert len(use_time_stamps) == input_shape[0]
-
-        self.max_workers = max_workers
         self.shuffle = shuffle
         if shuffle:
             self.seed = seed if seed is not None else 13
             self.rng = np.random.default_rng(seed = self.seed)
         
-        if file_type not in ["csv", "parquet"]:
-            raise ValueError("file_type can only be \"csv\" or \"parquet\"!")
-        self.file_type = file_type
-        self.recon_files = glob.glob(
-            data_directory_path + "recon" + data_format + "*." + file_type, 
-            recursive=is_directory_recursive
-        )
-        
-        self.recon_files.sort()
-        if file_count != None:
-            if not files_from_end:
-                self.recon_files = self.recon_files[:file_count]
-            else:
-                self.recon_files = self.recon_files[-file_count:]
-
-        self.label_files = [
-            labels_directory_path + recon_file.split('/')[-1].replace("recon" + data_format, "labels") for recon_file in self.recon_files
-        ]
-
-        self.file_offsets = [0]
-        self.dataset_mean = None
-        self.dataset_std = None
-
         # If data is already prepared load anduse that data
         if load_from_tfrecords_dir is not None:
+            self.file_offsets = [None]
             if not os.path.isdir(load_from_tfrecords_dir):
                 raise ValueError(f"Directory {load_from_tfrecords_dir} does not exist.")
             else:
                 self.tfrecords_dir = load_from_tfrecords_dir
         else:
+            n_time, height, width = input_shape
+            if use_time_stamps == -1:
+                use_time_stamps = list(np.arange(0,20))
+            assert len(use_time_stamps) == n_time, f"Expected {n_time} time steps, got {len(use_time_stamps)}"
+    
+            len_xy = height * width
+            col_indices = [
+                np.arange(t * len_xy, (t + 1) * len_xy).astype(str)
+                for t in use_time_stamps
+            ]
+            self.use_time_stamps = list(np.arange(0,20)) if use_time_stamps == -1 else use_time_stamps
+            self.recon_cols = np.concatenate(col_indices).tolist()
+    
+    
+    
+            self.max_workers = max_workers
+            self.shuffle = shuffle
+
+            
+            self.files = sorted(glob.glob(os.path.join(dataset_base_dir, "part.*.parquet"), recursive=False))
+    
+            if file_count != None:
+                if not files_from_end:
+                    self.files = self.files[:file_count]
+                else:
+                    self.files = self.files[-file_count:]
+    
+    
+            self.file_offsets = [0]
+            self.dataset_mean = None
+            self.dataset_std = None
+
+            # safe_remove_directory(tfrecords_dir)
             utils.safe_remove_directory(tfrecords_dir)
             self.batch_size = batch_size
             self.labels_list = labels_list
-            self.scaling_list = scaling_list
             self.input_shape = input_shape
             self.transpose = transpose
             self.to_standardize = to_standardize
@@ -166,14 +141,14 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
             self.save_batches_parallel() # save all the batches
             del self.current_dataframes 
             
-            
         self.tfrecord_filenames = np.sort(np.array(tf.io.gfile.glob(os.path.join(self.tfrecords_dir, "*.tfrecord"))))
         self.quantize = quantize
         self.epoch_count = 0
         self.on_epoch_end()
 
+
     def process_file_parallel(self):
-        file_infos = [(afile, self.use_time_stamps, self.file_type, self.input_shape, self.transpose) for afile in self.recon_files]
+        file_infos = [(afile, self.recon_cols, self.input_shape, self.transpose, self.labels_list) for afile in self.files]
         results = []
         with ProcessPoolExecutor(self.max_workers) as executor:
             futures = [executor.submit(self._process_file_single, file_info) for file_info in file_infos]
@@ -194,19 +169,17 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
                 self.dataset_mean += amean
                 self.dataset_std += avariance
 
-        self.dataset_mean = self.dataset_mean / len(self.recon_files)
-        self.dataset_std = np.sqrt(self.dataset_std / len(self.recon_files)) 
+        self.dataset_mean = self.dataset_mean / len(self.files)
+        self.dataset_std = np.sqrt(self.dataset_std / len(self.files)) 
             
         self.file_offsets = np.array(self.file_offsets)
 
     @staticmethod
     def _process_file_single(file_info):
-        afile, use_time_stamps, file_type, input_shape, transpose = file_info
-        if file_type == "csv":
-            adf = pd.read_csv(afile).dropna()
-        elif file_type == "parquet":
-            adf = pd.read_parquet(afile, columns=use_time_stamps).dropna()
-    
+        afile, recon_cols, input_shape, transpose, labels_list = file_info
+        df = pd.read_parquet(afile, columns=recon_cols + labels_list)
+        adf, _ = split_df_to_X_y_df(df, input_shape, labels_list, recon_cols)
+
         x = adf.values
         nonzeros = abs(x) > 0
         x[nonzeros] = np.sign(x[nonzeros]) * np.log1p(abs(x[nonzeros])) / math.log(2)
@@ -278,28 +251,25 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
             return TFRfile_path
         except Exception as e:
             return f"Error saving batch {batch_index}: {e}" 
-    
+        
     def prepare_batch_data(self, batch_index):
         """
-        Used to fetch a batch of inputs (X,y) for the network's training.
+        Fetch and prepare one batch (X, y).
         """
-        index = batch_index * self.batch_size # absolute *event* index
-        
-        file_index = np.arange(self.file_offsets.size)[index < self.file_offsets][0] - 1 # first index is 0!
+        abs_idx = batch_index * self.batch_size
+        file_idx = (np.arange(self.file_offsets.size)[abs_idx < self.file_offsets][0] - 1)
+        rel_idx = abs_idx - self.file_offsets[file_idx]
+        stop_idx = min(rel_idx + self.batch_size, self.file_offsets[file_idx + 1] - self.file_offsets[file_idx])
 
-        index = index - self.file_offsets[file_index] # relative event index in file
-        batch_size = min(index + self.batch_size, self.file_offsets[file_index + 1] - self.file_offsets[file_index])
-        
-        if file_index != self.current_file_index:
-            self.current_file_index = file_index
-            # print()
-            # print(self.recon_files[file_index])
-            if self.file_type == "csv":
-                recon_df = pd.read_csv(self.recon_files[file_index])
-                labels_df = pd.read_csv(self.label_files[file_index])[self.labels_list]
-            elif self.file_type == "parquet":
-                recon_df = pd.read_parquet(self.recon_files[file_index], columns=self.use_time_stamps)
-                labels_df = pd.read_parquet(self.label_files[file_index], columns=self.labels_list)
+        if file_idx != self.current_file_index:
+            self.current_file_index = file_idx
+            parquet_file = self.files[file_idx]
+
+            all_columns_to_read = self.recon_cols + self.labels_list
+            df = pd.read_parquet(parquet_file, columns=all_columns_to_read).reset_index(drop=True) 
+
+            # df = pd.read_parquet(parquet_file, columns=self.use_time_stamps)
+            recon_df, labels_df = split_df_to_X_y_df(df, self.input_shape, self.labels_list, self.recon_cols)
 
             has_nans = np.any(np.isnan(recon_df.values), axis=1)
             has_nans = np.arange(recon_df.shape[0])[has_nans]
@@ -332,16 +302,14 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
         
         recon_df, labels_df = self.current_dataframes
 
-        # print(f'start_index: {index}\t end_index: {batch_size}')
-        X = recon_df[index:batch_size]
-        y = labels_df[index:batch_size] / np.array(self.scaling_list)
+        X = recon_df[rel_idx:stop_idx]
+        y = labels_df[rel_idx:stop_idx] / np.array([75., 18.75, 8.0, 0.5])
     
         if self.include_y_local:
             y_local = labels_df.iloc[chosen_idxs]["y-local"].values
             return [X, y_local], y
         else:
             return X, y
-
     
     def serialize_example(self, X, y):
         """
@@ -379,7 +347,6 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
         if isinstance(value, type(tf.constant(0))): # check if Tf tensor
             value = value.numpy()
         return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
-
 
     def __getitem__(self, batch_index):
         """
