@@ -100,13 +100,14 @@ def CreateModel_Full(shape):
     model = Model(inputs=x_in, outputs=stack, name="smrtpxl_regression")
     return model
 
-def CreateModel_Slim_SoftQuantizer(shape):
+def CreateModel_Slim_SoftQuantizer(shape, initial_thresholds, threshold_offset):
     x_base = x_in = Input(shape, name="input_pxls/")
     x_base = SoftQuantizeLayer(
         n_bits=2,                     
-        initial_range=[-1.0, 1.0],    
+        initial_thresholds=initial_thresholds,
+        threshold_offset=threshold_offset,
         trainable_levels=False,
-        trainable_thresholds=True,          
+        trainable_thresholds=True, 
         initial_k=1.0,                
         trainable_k=True,             
         name='soft_quantizer_output'  
@@ -117,13 +118,14 @@ def CreateModel_Slim_SoftQuantizer(shape):
     model = Model(inputs=x_in, outputs=stack, name="smrtpxl_regression")
     return model
     
-def CreateModel_Full_SoftQuantizer(shape):
+def CreateModel_Full_SoftQuantizer(shape, initial_thresholds, threshold_offset):
     x_base = x_in = Input(shape, name="input_pxls/")
     x_base = SoftQuantizeLayer(
         n_bits=2,                     
-        initial_range=[-1.0, 1.0],    
+        initial_thresholds=initial_thresholds,
+        threshold_offset=threshold_offset,    
         trainable_levels=False,
-        trainable_thresholds=True,          
+        trainable_thresholds=True,
         initial_k=1.0,                
         trainable_k=True,             
         name='soft_quantizer_output'  
