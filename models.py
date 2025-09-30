@@ -76,7 +76,7 @@ def CreateModel_Max_SoftQuantizer(shape, n_filters, pool_size):
         n_bits=2,                     
         initial_range=[-1.0, 1.0],    
         trainable_levels=False,
-        trainable_bins=True,          
+        trainable_threshold=True,          
         initial_k=1.0,                
         trainable_k=True,             
         name='soft_quantizer_output'  
@@ -107,3 +107,25 @@ def CreateModel_Full(shape, n_filters, pool_size):
     model = Model(inputs=x_in, outputs=stack)
     return model
 
+def CreateModel_Full_SoftQuantizer(shape, n_filters, pool_size):
+    x_base = x_in = Input(shape)
+    x_base = SoftQuantizeLayer(
+        n_bits=2,                     
+        initial_range=[-1.0, 1.0],    
+        trainable_levels=False,
+        trainable_thresholds=True,          
+        initial_k=1.0,                
+        trainable_k=True,             
+        name='soft_quantizer_output'  
+    )(x_base)
+    stack = conv_network(x_base)
+    stack = AveragePooling2D(
+        pool_size=(pool_size, pool_size), 
+        strides=None, 
+        padding="valid", 
+        data_format=None,        
+    )(stack)
+    stack = QActivation("quantized_bits(8, 0, alpha=1)")(stack)
+    stack = var_network(stack, hidden=16, output=8)
+    model = Model(inputs=x_in, outputs=stack)
+    return model
