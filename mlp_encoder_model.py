@@ -87,21 +87,21 @@ def mlp_encoder_network(var, hidden=16, hidden_dimx=16, hidden_dimy=16):
     return var
 
 def CreateModel_Slim(shape):
-    x_base = x_in = Input(shape, name="input_pxls/")
+    x_base = x_in = Input(shape, name="input_pxls")
     stack = mlp_encoder_network(x_base)
     stack = var_network(stack, hidden=16, output=3) # this network should only be used with 'slim' (3) or 'full' (8) regression targets
     model = Model(inputs=x_in, outputs=stack, name="smrtpxl_regression")
     return model
 
 def CreateModel_Full(shape):
-    x_base = x_in = Input(shape, name="input_pxls/")
+    x_base = x_in = Input(shape, name="input_pxls")
     stack = mlp_encoder_network(x_base)
     stack = var_network(stack, hidden=16, output=8) # this network should only be used with 'slim' (3) or 'full' (8) regression targets
     model = Model(inputs=x_in, outputs=stack, name="smrtpxl_regression")
     return model
 
 def CreateModel_Slim_SoftQuantizer(shape, initial_thresholds, threshold_offset):
-    x_base = x_in = Input(shape, name="input_pxls/")
+    x_base = x_in = Input(shape, name="input_pxls")
     x_base = SoftQuantizeLayer(
         n_bits=2,                     
         initial_thresholds=initial_thresholds,
@@ -119,7 +119,7 @@ def CreateModel_Slim_SoftQuantizer(shape, initial_thresholds, threshold_offset):
     return model
     
 def CreateModel_Full_SoftQuantizer(shape, initial_thresholds, threshold_offset):
-    x_base = x_in = Input(shape, name="input_pxls/")
+    x_base = x_in = Input(shape, name="input_pxls")
     x_base = SoftQuantizeLayer(
         n_bits=2,                     
         initial_thresholds=initial_thresholds,
