@@ -105,6 +105,7 @@ def CreateModel_Slim_SoftQuantizer(shape, initial_thresholds, threshold_offset):
     x_base = SoftQuantizeLayer(
         n_bits=2,                     
         initial_thresholds=initial_thresholds,
+        initial_levels=np.array([0,1,2,3]),
         threshold_offset=threshold_offset,
         trainable_levels=False,
         trainable_thresholds=True, 
