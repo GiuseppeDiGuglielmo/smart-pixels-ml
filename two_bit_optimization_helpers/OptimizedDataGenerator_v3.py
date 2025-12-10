@@ -55,37 +55,47 @@ def tf_bucketize(x, boundaries, side='right'):
 
 class OptimizedDataGenerator(tf.keras.utils.Sequence):
     def __init__(self, 
-            dataset_base_dir: str = "./",
-            batch_size: int = 32,
-            optimize_batch_size: bool = False,
-            file_count = None,
-            labels_list: Union[List,str] = ['x-midplane','y-midplane','cotAlpha','cotBeta'],
-            to_standardize: bool = False,
-            log_compression: bool = False,
-            input_shape: Tuple = (13,21),
-            transpose = None,
-            files_from_end = False,
-            shuffle=False,
+        dataset_base_dir: str = "./",
+        batch_size: int = 32,
+        optimize_batch_size: bool = False,
+        file_count = None,
+        labels_list: Union[List,str] = ['x-midplane','y-midplane','cotAlpha','cotBeta'],
+        to_standardize: bool = False,
+        log_compression: bool = False,
+        input_shape: Tuple = (13,21),
+        transpose = None,
+        files_from_end = False,
+        shuffle=False,
 
-            # Added in Optimized datagenerators 
-            load_from_tfrecords_dir: str = None,
-            tfrecords_dir: str = None,
-            use_time_stamps = -1,
-            select_contained = False, #If true, selects only clusters with chargeOriginal_atEdge<50
-            noise = -1, #add gaussian noise (mu, sigma), set to -1 to turn off
-            seed: int = None,
-            quantize: bool = False,
-            digitize: bool = False, # for the manual 2bit mapping
-            digitize_levels: Union[List[float], np.ndarray] = None,
-            digitize_thresholds: Union[List[float], np.ndarray] = None,
-            max_workers: int = 1,
-            label_scale_pctl: float = 99,
-            norm_pos_pctl: float = 99.7,
-            norm_neg_pctl: float = 99.7,
-            tail_tol: float = 0.75,
-            labels_scale = None,
-            **kwargs,
-            ):
+        # Added in Optimized datagenerators 
+        load_from_tfrecords_dir: str = None,
+        tfrecords_dir: str = None,
+        use_time_stamps = -1,
+        select_contained = False, #If true, selects only clusters with chargeOriginal_atEdge<50
+        noise = -1, #add gaussian noise (mu, sigma), set to -1 to turn off
+        seed: int = None,
+        quantize: bool = False,
+        digitize: bool = False, # for the manual 2bit mapping
+        digitize_levels: Union[List[float], np.ndarray] = None,
+        digitize_thresholds: Union[List[float], np.ndarray] = None,
+        max_workers: int = 1,
+        label_scale_pctl: float = 99,
+        norm_pos_pctl: float = 99.7,
+        norm_neg_pctl: float = 99.7,
+        tail_tol: float = 0.75,
+        labels_scale = None,
+
+        # For custom standardization scaling factors (useful for testing on dataset 2s with same std factors as 3sr)
+        custom_standardization  = False,
+        dataset_mean            = None,
+        dataset_std             = None,
+        dataset_max             = None,
+        dataset_min             = None,
+        norm_factor_pos         = None,
+        norm_factor_neg         = None,        
+             
+        **kwargs,
+        ):
         super().__init__() 
 
         self.shuffle = shuffle
@@ -123,11 +133,14 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
                     self.files = self.files[-file_count:]
     
             self.file_offsets = [0]
-            self.dataset_mean = None
-            self.dataset_std = None
-            self.norm_factor_pos = None  
-            self.norm_factor_neg = None
+            self.dataset_mean = np.array(dataset_mean) if dataset_mean is not None else None
+            self.dataset_std = np.array(dataset_std) if dataset_std is not None else None
+            self.dataset_max = dataset_max
+            self.dataset_min = dataset_min
+            self.norm_factor_pos = norm_factor_pos  
+            self.norm_factor_neg = norm_factor_neg
             self.labels_scale = labels_scale
+            self.custom_standardization = custom_standardization
 
             self.labels_list = labels_list
             self.input_shape = input_shape
@@ -135,8 +148,8 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
             self.to_standardize = to_standardize
             self.log_compression = log_compression
             self.select_contained = select_contained
-            self.process_file_parallel()
             
+            self.process_file_parallel()
             
             if optimize_batch_size:
                 original_bs = batch_size
@@ -297,11 +310,21 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
             
 
     def process_file_parallel(self):
-        file_infos = [(afile, 
-                    self.recon_cols, self.labels_list, self.select_contained, 
-                    self.log_compression, self.label_scale_pctl, self.norm_pos_pctl, self.norm_neg_pctl, self.labels_scale) 
-                    for afile in self.files
-                    ]
+        file_infos = [
+            (
+                afile, 
+                self.recon_cols,
+                self.labels_list, 
+                self.select_contained, 
+                self.log_compression, 
+                self.label_scale_pctl, 
+                self.norm_pos_pctl, 
+                self.norm_neg_pctl, 
+                self.labels_scale,
+            ) 
+                    
+            for afile in self.files
+        ]
         results = []
         with ProcessPoolExecutor(self.max_workers) as executor:
             futures = [executor.submit(self._process_file_single, file_info) for file_info in file_infos]
@@ -311,33 +334,36 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
         manual_labels_scale = False
         if self.labels_scale is not None:
             manual_labels_scale = True
-
-        for amean, avariance, amin, amax, num_rows, labels_scale, pos_scale, neg_scale in results:
+        
+        for amean, avariance, amin, amax, num_rows, pos_scale, neg_scale, labels_scale in results:
             self.file_offsets.append(self.file_offsets[-1] + num_rows)
 
-            if self.dataset_mean is None:
-                self.dataset_max = amax
-                self.dataset_min = amin
-                self.dataset_mean = amean
-                self.dataset_std = avariance
-            else:
-                self.dataset_max = max(self.dataset_max, amax)
-                self.dataset_min = min(self.dataset_min, amin)
-                self.dataset_mean += amean
-                self.dataset_std += avariance
-            
+            # if not custom std scaling, determine the dataset's standardization scaling factors
+            if not self.custom_standardization: 
+                if self.dataset_mean is None:
+                    self.dataset_max = amax
+                    self.dataset_min = amin
+                    self.dataset_mean = amean
+                    self.dataset_std = avariance
+                else:
+                    self.dataset_max = max(self.dataset_max, amax)
+                    self.dataset_min = min(self.dataset_min, amin)
+                    self.dataset_mean += amean
+                    self.dataset_std += avariance
+                    
+                self.norm_factor_pos = (pos_scale if self.norm_factor_pos is None
+                                        else max(self.norm_factor_pos, pos_scale))
+                self.norm_factor_neg = (neg_scale if self.norm_factor_neg is None
+                                        else max(self.norm_factor_neg, neg_scale))
+
             if self.labels_scale is None:
                 self.labels_scale = labels_scale
             elif manual_labels_scale == False:
                 self.labels_scale = np.maximum(self.labels_scale, labels_scale)
 
-            self.norm_factor_pos = (pos_scale if self.norm_factor_pos is None
-                                    else max(self.norm_factor_pos, pos_scale))
-            self.norm_factor_neg = (neg_scale if self.norm_factor_neg is None
-                                    else max(self.norm_factor_neg, neg_scale))
-
-        self.dataset_mean = self.dataset_mean / len(self.files)
-        self.dataset_std = np.sqrt(self.dataset_std / len(self.files)) 
+        if not self.custom_standardization:
+            self.dataset_mean = self.dataset_mean / len(self.files)
+            self.dataset_std = np.sqrt(self.dataset_std / len(self.files)) 
             
         self.file_offsets = np.array(self.file_offsets)
 
@@ -388,7 +414,7 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
         del df
         gc.collect()
         
-        return amean, avariance, amin, amax, len_adf, labels_scale, pos_scale, neg_scale
+        return amean, avariance, amin, amax, len_adf, pos_scale, neg_scale, labels_scale
 
     def standardize(self, x):
         """

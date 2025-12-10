@@ -5,7 +5,14 @@ def generate_tfrecords(
     dataset_dir, 
     train_batch_size, 
     val_batch_size,
-    to_standardize=False, 
+    to_standardize=False,
+    custom_standardization=False,
+    dataset_mean=None,
+    dataset_std=None,
+    dataset_max=None,
+    dataset_min=None,
+    norm_factor_pos=None,
+    norm_factor_neg=None,
     log_compression=False, 
     select_contained=False,
     timeslices=2, 
@@ -94,7 +101,15 @@ def generate_tfrecords(
                 files_from_end=True,
                 seed=seed,
                 labels_scale=labels_scale,
-    
+
+                custom_standardization=custom_standardization,
+                dataset_mean=dataset_mean,
+                dataset_std=dataset_std,
+                dataset_max=dataset_max,
+                dataset_min=dataset_min,
+                norm_factor_pos=norm_factor_pos,
+                norm_factor_neg=norm_factor_neg,
+                
                 tfrecords_dir=tfrecords_dir_test,
                 use_time_stamps=time_stamps,
                 max_workers=max_workers,
@@ -182,6 +197,14 @@ def generate_tfrecords(
                 shuffle=False,
                 seed=seed, 
                 labels_scale=labels_scale,
+
+                custom_standardization=custom_standardization,
+                dataset_mean=dataset_mean,
+                dataset_std=dataset_std,
+                dataset_max=dataset_max,
+                dataset_min=dataset_min,
+                norm_factor_pos=norm_factor_pos,
+                norm_factor_neg=norm_factor_neg,
     
                 tfrecords_dir=tfrecords_dir_train,
                 use_time_stamps=time_stamps,
@@ -205,6 +228,14 @@ def generate_tfrecords(
                 files_from_end=True,
                 seed=seed,
                 labels_scale=labels_scale,
+
+                custom_standardization=custom_standardization,
+                dataset_mean=dataset_mean,
+                dataset_std=dataset_std,
+                dataset_max=dataset_max,
+                dataset_min=dataset_min,
+                norm_factor_pos=norm_factor_pos,
+                norm_factor_neg=norm_factor_neg,
                 
                 tfrecords_dir=tfrecords_dir_val,
                 use_time_stamps=time_stamps,
@@ -225,6 +256,8 @@ def load_tfrecords(
     digitize_levels=None,
     digitize_thresholds=None,
     test_only=False,
+    to_standardize=False,
+    log_compression=False,
 ):
 
     if test_only:
