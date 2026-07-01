@@ -1,3 +1,9 @@
 .ipynb_checkpoints
 __pycache__
 config.json
+npy
+best-model
+smart-pixels
+smart-pixels-ml
+envsetup.sh
+runme.sh

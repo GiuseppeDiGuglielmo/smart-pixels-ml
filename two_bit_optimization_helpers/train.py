@@ -156,7 +156,7 @@ def train(
         shutil.rmtree(weights_directory)
     os.makedirs(weights_directory)  # Create fresh directory
 
-    checkpoint_filepath = weights_directory + '/weights.{epoch:02d}-t{loss:.2f}-v{val_loss:.2f}.hdf5'
+    checkpoint_filepath = weights_directory + '/weights.{epoch:02d}-t{loss:.3f}-v{val_loss:.3f}.hdf5'
     
     mcp = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath,
@@ -269,7 +269,7 @@ def cleanup_models_and_generators(objects: list):
     print('Cleanup complete: models, generators, and GPU memory freed.')
 
 def get_all_losses(input_dir):
-    checkpoints = natsorted(os.listdir(input_dir))
+    checkpoints = natsorted([f for f in os.listdir(input_dir) if f.startswith('weights.') and f.endswith('.hdf5')])
     train_losses = np.array([float(f.split('-t')[-1].split('-v')[0]) for f in checkpoints])
     validation_losses = np.array([float(f.split('-v')[-1].split('.hdf5')[0]) for f in checkpoints])
 
@@ -283,7 +283,7 @@ def get_all_thresholds(
     threshold_offset=80.0, 
     timeslices=2
 ): 
-    checkpoints = natsorted(os.listdir(input_dir))
+    checkpoints = natsorted([f for f in os.listdir(input_dir) if f.startswith('weights.') and f.endswith('.hdf5')])
     thresholds_1 = []
     thresholds_2 = []
     thresholds_3 = []
@@ -331,7 +331,7 @@ def save_performance_parquet(
     )
 
     # -------- Find best checkpoint --------
-    files = [f for f in os.listdir(checkpoints) if f.endswith(".hdf5")]
+    files = [f for f in os.listdir(checkpoints) if f.startswith("weights.") and f.endswith(".hdf5")]
     vloss = [float(f.split("-v")[1].split(".hdf5")[0]) for f in files]
     bestfile = files[np.argmin(vloss)]
 

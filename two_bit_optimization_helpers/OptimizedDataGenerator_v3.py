@@ -92,7 +92,10 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
         dataset_max             = None,
         dataset_min             = None,
         norm_factor_pos         = None,
-        norm_factor_neg         = None,        
+        norm_factor_neg         = None,
+
+        # For ROI
+        load_roi = False,      
              
         **kwargs,
         ):
@@ -106,17 +109,29 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
         if load_from_tfrecords_dir is None:
             # CREATOR MODE
             n_time, height, width = input_shape
+            print(f"=====================> input_shape: {input_shape}")
             
             if use_time_stamps == -1:
                 use_time_stamps = list(np.arange(0,20))
             assert len(use_time_stamps) == n_time, f"Expected {n_time} time steps, got {len(use_time_stamps)}"
     
             len_xy = height * width
-            col_indices = [
-                np.arange(t * len_xy, (t + 1) * len_xy).astype(str)
-                for t in use_time_stamps
-            ]
-            self.recon_cols = np.concatenate(col_indices).tolist()
+            if load_roi:
+                # recon_cols = [f"{t}_{x}_{y}" for t in use_time_stamps for x in range(height) for y in range(width)]
+                col_indices = []
+                for t in use_time_stamps:
+                    for x in range(height):
+                        for y in range(width):
+                            col_indices.append(f"roi_tf{t}_h{x}_w{y}")
+                self.recon_cols = col_indices
+            else:
+                col_indices = [
+                    np.arange(t * len_xy, (t + 1) * len_xy).astype(str)
+                    for t in use_time_stamps
+                ]
+                self.recon_cols = np.concatenate(col_indices).tolist()
+            print(f"=====================> len_xy: {len_xy}")
+            print(f"=====================> recon_cols: {self.recon_cols}")
     
             self.max_workers = max_workers
             self.label_scale_pctl = label_scale_pctl

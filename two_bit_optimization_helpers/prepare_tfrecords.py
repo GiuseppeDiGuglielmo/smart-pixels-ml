@@ -23,12 +23,19 @@ def generate_tfrecords(
     model_type=None,
     labels_scale=None,
     test_only=False,
+    load_roi=False, # ROI
 ):
     # determine labels_list
     if 'Slim' in model_type:
-        labels_list=['x-midplane','y-midplane','cotBeta']
+        if load_roi:
+            labels_list=['x-coi-roi-symmetric-physical','y-coi-roi-symmetric-physical','cotBeta']
+        else:
+            labels_list=['x-midplane','y-midplane','cotBeta']
     else:
-        labels_list=['x-midplane','y-midplane','cotAlpha','cotBeta']
+        if load_roi:
+            labels_list=['x-coi-roi-symmetric-physical','y-coi-roi-symmetric-physical','cotAlpha','cotBeta']
+        else:
+            labels_list=['x-midplane','y-midplane','cotAlpha','cotBeta']
         
     # determine the time stamps to use
     if timeslices==2:
@@ -113,6 +120,8 @@ def generate_tfrecords(
                 tfrecords_dir=tfrecords_dir_test,
                 use_time_stamps=time_stamps,
                 max_workers=max_workers,
+
+                load_roi=load_roi, # ROI
             )
         return dataset_test_dir, tfrecords_dir_test
         
