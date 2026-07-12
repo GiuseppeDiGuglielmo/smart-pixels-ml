@@ -148,8 +148,8 @@ def generate_tfrecords(
                 data_format="3D",
                 batch_size=train_batch_size,
                 file_count=len(os.listdir(dataset_train_dir)),
-                to_standardize=to_standardize, 
-                log_compression=log_compression, 
+                to_standardize=to_standardize,
+                log_compression=log_compression,
                 select_contained=select_contained,
                 include_y_local=False,
                 labels_list=labels_list,
@@ -158,13 +158,13 @@ def generate_tfrecords(
                 shuffle=False,
                 seed=seed,
                 labels_scale=labels_scale,
-    
+
                 tfrecords_dir=tfrecords_dir_train,
                 use_time_stamps=time_stamps,
                 max_workers=max_workers,
                 load_from_tfrecords_dir=tfrecords_dir_train,
             )
-    
+
             validation_generator=OptimizedDataGenerator(
                 dataset_base_dir=dataset_validation_dir,
                 file_type="parquet",
@@ -178,17 +178,17 @@ def generate_tfrecords(
                 labels_list=labels_list,
                 input_shape=(timeslices,16,16),
                 transpose=(0,2,3,1),
-                shuffle=False, 
+                shuffle=False,
                 files_from_end=True,
                 seed=seed,
                 labels_scale=labels_scale,
-    
+
                 tfrecords_dir=tfrecords_dir_val,
                 use_time_stamps=time_stamps,
                 max_workers=max_workers,
                 load_from_tfrecords_dir=tfrecords_dir_val,
             )
-        
+
         else:
             training_generator=OptimizedDataGenerator(
                 dataset_base_dir=dataset_train_dir,
@@ -196,15 +196,15 @@ def generate_tfrecords(
                 data_format="3D",
                 batch_size=train_batch_size,
                 file_count=len(os.listdir(dataset_train_dir)),
-                to_standardize=to_standardize, 
-                log_compression=log_compression, 
+                to_standardize=to_standardize,
+                log_compression=log_compression,
                 select_contained=select_contained,
                 include_y_local=False,
                 labels_list=labels_list,
                 input_shape=(timeslices,16,16),
                 transpose=(0,2,3,1),
                 shuffle=False,
-                seed=seed, 
+                seed=seed,
                 labels_scale=labels_scale,
 
                 custom_standardization=custom_standardization,
@@ -214,12 +214,13 @@ def generate_tfrecords(
                 dataset_min=dataset_min,
                 norm_factor_pos=norm_factor_pos,
                 norm_factor_neg=norm_factor_neg,
-    
+
                 tfrecords_dir=tfrecords_dir_train,
                 use_time_stamps=time_stamps,
                 max_workers=max_workers,
+                load_roi=load_roi, # ROI
             )
-            
+
             validation_generator=OptimizedDataGenerator(
                 dataset_base_dir=dataset_validation_dir,
                 file_type="parquet",
@@ -233,7 +234,7 @@ def generate_tfrecords(
                 labels_list=labels_list,
                 input_shape=(timeslices,16,16),
                 transpose=(0,2,3,1),
-                shuffle=False, 
+                shuffle=False,
                 files_from_end=True,
                 seed=seed,
                 labels_scale=labels_scale,
@@ -245,11 +246,12 @@ def generate_tfrecords(
                 dataset_min=dataset_min,
                 norm_factor_pos=norm_factor_pos,
                 norm_factor_neg=norm_factor_neg,
-                
+
                 tfrecords_dir=tfrecords_dir_val,
                 use_time_stamps=time_stamps,
                 max_workers=max_workers,
-            ) 
+                load_roi=load_roi, # ROI
+            )
     
         return dataset_train_dir, dataset_validation_dir, tfrecords_dir_train, tfrecords_dir_val
 

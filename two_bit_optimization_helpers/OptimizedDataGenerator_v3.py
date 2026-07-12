@@ -163,7 +163,8 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
             self.to_standardize = to_standardize
             self.log_compression = log_compression
             self.select_contained = select_contained
-            
+            self.load_roi = load_roi
+
             self.process_file_parallel()
             
             if optimize_batch_size:
@@ -252,6 +253,7 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
             "transpose": self.transpose,
             "shuffle": self.shuffle,
             "select_contained": self.select_contained,
+            "load_roi": self.load_roi,
             "seed": self.seed,
             "label_scale_pctl": self.label_scale_pctl,
             "norm_pos_pctl": self.norm_pos_pctl,
@@ -297,6 +299,7 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
         self.to_standardize = metadata['to_standardize']
         self.log_compression = metadata['log_compression']
         self.select_contained = metadata['select_contained']
+        self.load_roi = metadata.get('load_roi', False)
         self.label_scale_pctl = metadata['label_scale_pctl']
         self.norm_pos_pctl = metadata['norm_pos_pctl']
         self.norm_neg_pctl = metadata['norm_neg_pctl']
@@ -327,16 +330,17 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
     def process_file_parallel(self):
         file_infos = [
             (
-                afile, 
+                afile,
                 self.recon_cols,
-                self.labels_list, 
-                self.select_contained, 
-                self.log_compression, 
-                self.label_scale_pctl, 
-                self.norm_pos_pctl, 
-                self.norm_neg_pctl, 
+                self.labels_list,
+                self.select_contained,
+                self.load_roi,
+                self.log_compression,
+                self.label_scale_pctl,
+                self.norm_pos_pctl,
+                self.norm_neg_pctl,
                 self.labels_scale,
-            ) 
+            )
                     
             for afile in self.files
         ]
@@ -384,16 +388,20 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
 
     @staticmethod
     def _process_file_single(file_info):
-        afile, recon_cols, labels_list, select_contained, log_compression, label_scale_pctl, norm_pos_pctl, norm_neg_pctl, custom_labels_scale = file_info
+        afile, recon_cols, labels_list, select_contained, load_roi, log_compression, label_scale_pctl, norm_pos_pctl, norm_neg_pctl, custom_labels_scale = file_info
+        extra_cols = []
         if select_contained:
-            df = (pd.read_parquet(afile, 
-                                 columns=recon_cols + labels_list +['chargeOriginal_atEdge'])
-                    .reset_index(drop=True))
+            extra_cols.append('chargeOriginal_atEdge')
+        if load_roi:
+            extra_cols.append('roi_tf19_contained')
+        df = (pd.read_parquet(afile,
+                              columns=recon_cols + labels_list + extra_cols)
+                .reset_index(drop=True))
+        if select_contained:
             df = df.loc[df['chargeOriginal_atEdge'] < 50]
-        else:
-            df = (pd.read_parquet(afile, 
-                                 columns=recon_cols + labels_list)
-                    .reset_index(drop=True))
+        if load_roi:
+            # keep only contained ROI clusters; this also drops -9999 sentinel rows
+            df = df.loc[df['roi_tf19_contained'] == True]
         # df = pd.read_parquet(afile, columns=recon_cols + labels_list).reset_index(drop=True)
         x = df[recon_cols].values
             
@@ -594,19 +602,21 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
 
             if file_idx != self.current_file_index:
                 parquet_file = self.files[file_idx]
+                extra_cols = []
                 if self.select_contained:
-                    all_columns_to_read = self.recon_cols + self.labels_list + ['chargeOriginal_atEdge']
-                    df = (pd.read_parquet(parquet_file, 
-                                         columns = all_columns_to_read)
-                            .dropna(subset=self.recon_cols)
-                            .reset_index(drop=True))
+                    extra_cols.append('chargeOriginal_atEdge')
+                if self.load_roi:
+                    extra_cols.append('roi_tf19_contained')
+                all_columns_to_read = self.recon_cols + self.labels_list + extra_cols
+                df = (pd.read_parquet(parquet_file,
+                                      columns=all_columns_to_read)
+                        .dropna(subset=self.recon_cols)
+                        .reset_index(drop=True))
+                if self.select_contained:
                     df = df.loc[df['chargeOriginal_atEdge'] < 50]
-                else:
-                    all_columns_to_read = self.recon_cols + self.labels_list
-                    df =(pd.read_parquet(parquet_file, 
-                                         columns = all_columns_to_read)
-                            .dropna(subset=self.recon_cols)
-                            .reset_index(drop=True))
+                if self.load_roi:
+                    # keep only contained ROI clusters; this also drops -9999 sentinel rows
+                    df = df.loc[df['roi_tf19_contained'] == True]
                 # df = (pd.read_parquet(parquet_file,
                 #                     columns=self.recon_cols + self.labels_list)
                 #         .dropna(subset=self.recon_cols)
