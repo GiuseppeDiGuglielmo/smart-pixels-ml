@@ -24,15 +24,17 @@ def generate_tfrecords(
     labels_scale=None,
     test_only=False,
     load_roi=False, # ROI
+    use_roi_labels=True,
 ):
     # determine labels_list
+    use_roi_label_columns = load_roi and use_roi_labels
     if 'Slim' in model_type:
-        if load_roi:
+        if use_roi_label_columns:
             labels_list=['x-coi-roi-symmetric-physical','y-coi-roi-symmetric-physical','cotBeta']
         else:
             labels_list=['x-midplane','y-midplane','cotBeta']
     else:
-        if load_roi:
+        if use_roi_label_columns:
             labels_list=['x-coi-roi-symmetric-physical','y-coi-roi-symmetric-physical','cotAlpha','cotBeta']
         else:
             labels_list=['x-midplane','y-midplane','cotAlpha','cotBeta']
@@ -51,6 +53,9 @@ def generate_tfrecords(
     slim_label=''
     if 'Slim' in model_type:
         slim_label='_slim'
+    roi_label=''
+    if load_roi and not use_roi_labels:
+        roi_label='_midplane_labels'
     standardize_label=''
     if to_standardize:
         standardize_label='_std'
@@ -64,7 +69,7 @@ def generate_tfrecords(
     if test_only:
         dataset_test_dir=os.path.join(dataset_dir, f"test{contained_label}")
         tfrecords_dir=os.path.join(dataset_dir, "TFR_files", f"{timeslices}t")
-        tfrecords_dir_test=os.path.join(tfrecords_dir, f"TFR_test{contained_label}{slim_label}{standardize_label}{log_compression_label}")
+        tfrecords_dir_test=os.path.join(tfrecords_dir, f"TFR_test{contained_label}{slim_label}{roi_label}{standardize_label}{log_compression_label}")
         os.makedirs(tfrecords_dir_test, exist_ok=True)
         if tfrecords_exist:
             generator=OptimizedDataGenerator(
@@ -130,8 +135,8 @@ def generate_tfrecords(
         dataset_validation_dir=os.path.join(dataset_dir, f"test{contained_label}")
     
         tfrecords_dir=os.path.join(dataset_dir, "TFR_files", f"{timeslices}t")
-        tfrecords_dir_train=os.path.join(tfrecords_dir, f"TFR_train{contained_label}{slim_label}{standardize_label}{log_compression_label}")
-        tfrecords_dir_val=os.path.join(tfrecords_dir, f"TFR_test{contained_label}{slim_label}{standardize_label}{log_compression_label}")
+        tfrecords_dir_train=os.path.join(tfrecords_dir, f"TFR_train{contained_label}{slim_label}{roi_label}{standardize_label}{log_compression_label}")
+        tfrecords_dir_val=os.path.join(tfrecords_dir, f"TFR_test{contained_label}{slim_label}{roi_label}{standardize_label}{log_compression_label}")
     
     
         dirs_to_create=[

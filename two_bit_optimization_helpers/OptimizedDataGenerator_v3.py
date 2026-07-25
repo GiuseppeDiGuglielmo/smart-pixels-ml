@@ -400,8 +400,12 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
         if select_contained:
             df = df.loc[df['chargeOriginal_atEdge'] < 50]
         if load_roi:
-            # keep only contained ROI clusters; this also drops -9999 sentinel rows
+            # keep only contained ROI clusters
             df = df.loc[df['roi_tf19_contained'] == True]
+            # roi_tf19_contained does not catch every sentinel row: drop any row
+            # whose labels still hold the -9999 placeholder (rare, but a single
+            # one dominates the MSE)
+            df = df.loc[~(df[labels_list] <= -9000).any(axis=1)]
         # df = pd.read_parquet(afile, columns=recon_cols + labels_list).reset_index(drop=True)
         x = df[recon_cols].values
             
@@ -615,8 +619,12 @@ class OptimizedDataGenerator(tf.keras.utils.Sequence):
                 if self.select_contained:
                     df = df.loc[df['chargeOriginal_atEdge'] < 50]
                 if self.load_roi:
-                    # keep only contained ROI clusters; this also drops -9999 sentinel rows
+                    # keep only contained ROI clusters
                     df = df.loc[df['roi_tf19_contained'] == True]
+                    # roi_tf19_contained does not catch every sentinel row: drop any row
+                    # whose labels still hold the -9999 placeholder (rare, but a single
+                    # one dominates the MSE)
+                    df = df.loc[~(df[self.labels_list] <= -9000).any(axis=1)]
                 # df = (pd.read_parquet(parquet_file,
                 #                     columns=self.recon_cols + self.labels_list)
                 #         .dropna(subset=self.recon_cols)
