@@ -1,0 +1,22 @@
+name: smartpixels-regression-vitis-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10.16
+  - jupyterlab
+  - pydot==1.4.2
+  - graphviz==7.1.0
+  - scikit-learn==1.2.2
+  - pandas
+  - pyarrow
+  - matplotlib
+  - pip==23.0.1
+  - pip:
+      - tensorflow==2.14.0
+      - hls4ml[profiling,optimization,qkeras]==1.2.0
+      - tensorflow-model-optimization
+      - tensorflow-probability==0.22.0
+      # tensorflow-probability 0.22.0 pins typing-extensions<4.6.0, which is too
+      # old for jupyterlab/ipython - keep it pinned high here so the final
+      # resolved env has both working together.
+      - typing-extensions>=4.13

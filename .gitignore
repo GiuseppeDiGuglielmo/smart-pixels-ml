@@ -7,3 +7,5 @@ smart-pixels
 smart-pixels-ml
 envsetup.sh
 runme.sh
+envsetup_vitis.sh
+runme_vitis.sh
