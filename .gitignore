@@ -9,3 +9,10 @@ envsetup.sh
 runme.sh
 envsetup_vitis.sh
 runme_vitis.sh
+*_hls4ml_prj/
+animation.gif
+qkeras.png
+comparison_qkeras_hls4ml.jpeg
+myproject_config.yml
+tb_input_features.dat
+tb_output_predictions.dat
