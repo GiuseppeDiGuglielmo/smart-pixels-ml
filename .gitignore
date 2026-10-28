@@ -16,3 +16,9 @@ comparison_qkeras_hls4ml.jpeg
 myproject_config.yml
 tb_input_features.dat
 tb_output_predictions.dat
+animation_*.gif
+qkeras_*.png
+comparison_qkeras_hls4ml_*.jpeg
+myproject_config_*.yml
+tb_input_features_*.dat
+tb_output_predictions_*.dat

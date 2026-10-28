@@ -263,6 +263,15 @@ catapult -f build_prj.tcl    # GUI, no -shell
       "QMlp_Slim Catapult results" below, saved in
       `catapult_directives/QMlp_Slim.tcl`).
 - [ ] Same for QConv1D_Slim.
+      Smoke test 2026-10-27 with a 2 + 2 epoch model (fingerprint
+      `3eb13b90`), batch flow, no GUI: `fully_parallel.tcl` mapped 19
+      arrays, unrolled 49 loops; synthesis 9 min 7 s. Latency 1 cycle,
+      throughput 1 cycle (II=1), total area score 288,073.2
+      (post-assignment), register area 60.6, critical path 8.38 ns,
+      slack 16.62 ns. Per-layer MSE vs QKeras 0 up to activation_tanh_2,
+      1.1e-5 at dense_3. The slide's conv1d had latency 2 and area
+      398,576.93, but different inputs (13x21x2, 14 outputs). Full
+      training (1000 + 2000) started 2026-10-27; rerun codesign on it.
 
 ### Batch flow, no GUI (2026-10-27)
 
@@ -330,6 +339,40 @@ to reuse them; `QMlp_Slim_full_directives.tcl` is the solution's whole
 The old notebook instructions said `built_prj.tcl` (typo, fixed
 2026-10-26) and to edit `Synth False` by hand (no longer needed).
 
+### Side study: QMlp_Slim on Virtex-7 (2026-10-27)
+
+`codesign_catapult_efpga.ipynb`, a copy of `codesign_catapult.ipynb`:
+`QMlp_Slim`, Catapult 2024.2_2, `tech = "fpga"`, part
+`xc7vx485tffg1157-1` (Catapult maps it to `mgc_Xilinx-VIRTEX-7-1_beh`,
+checked in `catapult -shell`), hardcoded weights
+(`programmable_weights = False`), 25 ns clock, same batch flow and
+`fully_parallel.tcl`. Project folder
+`SmtPxl_QMlp_Slim_io_parallel_Latency_efpga_hls4ml_prj`;
+the files it writes to the repo root carry a `run_tag` suffix. Its
+"Remove existing project" cell uses no wildcard and deletes the folder
+only if its `hls4ml_config.yml` says `Technology: fpga`, the same part
+and not `BramFactor: 0` (programmable weights). A dry
+run (conversion and `write()` only) gave `setup_xilinx_part
+{xc7vx485tffg1157-1}` in `build_prj.tcl` and a top function with only
+the input and output ports.
+
+- [x] Run it top to bottom (VPN on) and record latency, throughput and
+      area. The area is Catapult's estimate; LUT/FF/DSP counts need
+      Vivado (`RTLSynth`).
+      Baseline (2026-10-27, pooling `fixed<16,8>`, kept as
+      `SmtPxl_QMlp_Slim_io_parallel_Latency_efpga_pool16_8_hls4ml_prj`):
+      latency 5 cycles, II=1, area score 265,913.0, slack 3.43 ns.
+      The design is about 5x too large for the target array.
+- [x] Pooling output narrowed to `ufixed<6,2>` (2026-10-27; lossless,
+      the outputs are k/16 with k in 0..48): per-layer MSE 0 at pooling,
+      1.2e-4 at `dense_3`, as before. Area score 266,031.0, latency 5,
+      II=1, slack 3.51 ns, so no gain: Catapult had already removed the
+      constant bits of the `fixed<16,8>` pooling output. Its
+      `concat_rtl.v` is `fasic-beast1:~/QMlp_Slim.v` (the baseline RTL
+      that was there before is only in the folder above).
+      The 5x has to come from retraining (fewer weight or ReLU bits,
+      more pruning), a smaller architecture, or `ReuseFactor` > 1.
+
 ## 6. Keep the results
 
 The Catapult number on the May 2025 slide was never saved, and a
@@ -348,6 +391,21 @@ license error was all that remained in the notebook. Do not repeat that.
 - [ ] Commit the notebooks with outputs, and `runs.csv`.
 
 ## Things to watch
+
+- QConv1D_Slim full training (1000 + 2000 epochs, fingerprint
+  `3eb13b90`, ended 2026-10-28 02:02, test MSE total 0.005676) is
+  protected: backup with checksums in
+  `smart-pixels/backups/QConv1D_Slim-3eb13b90-2026-10-28/` (README.txt
+  has the restore steps), and the two checkpoint folders and the two
+  `npy/2t-QConv1D_Slim-3eb13b90-*` files are read-only. A rerun of
+  `two_bit_optimization.ipynb` with QConv1D_Slim stops with
+  PermissionError at `shutil.rmtree` in `train.py` before deleting
+  anything. To retrain on purpose, `chmod -R u+w` them first.
+  QMlp_Slim (`392456de`) is not write-protected: it is to be retrained
+  from scratch (1000 + 2000 epochs, decided 2026-10-28) to get part 1
+  back. The current model (part 2 only, behind all QMlp_Slim Catapult
+  results so far) and the key Catapult reports are backed up in
+  `smart-pixels/backups/QMlp_Slim-392456de-2026-10-18/`.
 
 - Training runs on the CPU, not the GPU. The first code cell of both
   notebooks sets `CUDA_VISIBLE_DEVICES = "-1"` (added in `6cb1879`),
