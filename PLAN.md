@@ -12,7 +12,64 @@ inputs are now 2-bit ROI data instead of 4-bit 13x21 data, and the
 precisions are different. See `../SUMMARY.md` for where the slide came
 from.
 
-## Status (updated 2026-10-27)
+## Status (updated 2026-10-30)
+
+### Where things stand (2026-10-30), start here
+
+Training is finished for the three quantized Slim models on the ROI
+dataset (all 1000 + 2000 epochs, seed 42, CPU), each backed up with
+checksums and write-protected (see "Things to watch"):
+
+| Model | Fingerprint | Trained | Best val loss part 1 / 2 | Learned thresholds | QKeras test MSE total |
+|---|---|---|---|---|---|
+| QMlp_Slim | `392456de` | 2026-10-28 | 27.5634 / 26.4647 | `[276.16, 760.13, 1753.39]` | 0.004667 |
+| QConv1D_Slim | `3eb13b90` | 2026-10-28 | 32.7620 / 31.4773 | `[255.33, 693.94, 1665.04]` | 0.005676 |
+| QConv2D_Slim | `392456de` | 2026-10-30 | 44.2574 / 42.3299 | `[311.84, 890.80, 1832.28]` | 0.007418 |
+
+QConv2D_Slim is clearly the least accurate (x 0.0083, y 0.0033, cotB
+0.0106) and has the fewest parameters (1,682). Training speed per epoch:
+QMlp 29 s / 10 s, QConv1D 28 s / 10 s, QConv2D 33 s / 17 s (part 1 /
+part 2).
+
+Catapult 2024.2_2 results exist only for QMlp_Slim (old Oct 18 model)
+and QConv1D_Slim, see "Results summary (2026-10-28)" under step 6.
+
+Next steps, in order (codesign phase):
+
+- [ ] Rerun `codesign_catapult.ipynb` (ASIC, TSMC 28 nm) and
+      `codesign_catapult_efpga.ipynb` (Virtex-7) for the new QMlp_Slim
+      (`model_type = 'QMlp_Slim'`) and update the results table; the
+      current QMlp rows are for the Oct 18 model. Then delete
+      `smart-pixels/backups/QMlp_Slim-392456de-2026-10-18/` (it is the
+      only copy of the old Catapult reports, so only after the table is
+      updated).
+- [ ] Run `codesign_catapult.ipynb` for QConv2D_Slim. Not tried yet.
+      Check first: the precision settings in cell 53 use auto-numbered
+      Keras layer names (`input_1`, `average_pooling2d`, `q_dense_2`),
+      but a freshly built model has `input_2`, `average_pooling2d_1`,
+      `q_dense_5` (check with `model.summary()`); check the QKeras vs
+      hls4ml sign flips on the output layer (QConv1D `dense_3` overflowed
+      with `fixed<10,2>`); `QSeparableConv2D` goes through
+      `nnet_sepconv2d_latency.h`, and the fully unrolled 14x14
+      convolutions will probably make synthesis slow and large.
+- [ ] Optional, not approved: pruning (post-training 50 percent sparsity
+      keeps test MSE 0.005259 for QMlp, 60 percent gives 0.0165), as a
+      `prune_sparsity` option in the FPGA notebook, then fine-tuning;
+      the Virtex-7 design is about 5x too large for the target array.
+- [ ] Optional: validation set equals the test set in the training code
+      (test MSE slightly optimistic); input registers (inputs are not
+      registered, outputs are).
+
+Facts for the codesign work: ROI finder input is 48x192x2x2 = 36,864
+bits, its output is a 16x16x2x2 = 1,024-bit window plus 14-bit
+coordinates; the NN takes 512 values x 2 bits = 1,024 bits. Weights
+(bits): QMlp 2,096 x 8 = 16,768 plus 83 biases; QConv1D 2,604 weights
+= 20,592 bits plus 45 biases. Catapult needs the VPN for the license
+(`lmutil lmstat -c $LM_LICENSE_FILE -f CatapultUltra_c`). Headless
+notebook run: `source envsetup.sh`, then `~/catapult_venvs/2024.2_2/bin/python
+-m jupyter nbconvert --to notebook --execute --inplace
+--ExecutePreprocessor.kernel_name=catapult-2024.2_2
+--ExecutePreprocessor.timeout=-1 <notebook>`.
 
 ### Switch back to 2024.2_2 (2026-10-19)
 
@@ -68,8 +125,10 @@ Order (decided 2026-10-17): run steps 2 to 6 for `QMlp_Slim` first,
 retrained from scratch, then repeat them for `QConv1D_Slim`. Retraining
 reuses fingerprint `392456de` and overwrites the old QMlp_Slim model,
 so it was backed up first (412 files, checksums verified) to
-`smart-pixels/backups/QMlp_Slim-392456de-2026-08-03/` (gitignored). Its
-`README.txt` has the restore command and the old `runs.csv` row.
+`smart-pixels/backups/QMlp_Slim-392456de-2026-08-03/` (gitignored). That
+backup (200 + 200 epochs from 2026-08-03, test MSE total 0.005082,
+thresholds `[278.33, 767.71, 1784.56]`) was deleted on 2026-10-30,
+superseded by the full 1000 + 2000 runs.
 
 QMlp_Slim progress:
 
@@ -272,6 +331,21 @@ catapult -f build_prj.tcl    # GUI, no -shell
       1.1e-5 at dense_3. The slide's conv1d had latency 2 and area
       398,576.93, but different inputs (13x21x2, 14 outputs). Full
       training (1000 + 2000) started 2026-10-27; rerun codesign on it.
+      Trained model (2026-10-28, batch flow, synthesis 18 min with the
+      QMlp_Slim retraining on the CPU): same design as the smoke test
+      (programmable weights, so the area does not depend on the weight
+      values): latency 1, II=1, area 288,073.2, slack 16.62 ns. But
+      `dense_3` (`fixed<10,2>`, range -2 to 2) overflows: QKeras gives
+      y up to 2.224 and cotB down to -2.387, and ac_fixed wraps, so 36
+      (y) and 9 (cotB) of 255,409 events change sign. hls4ml test MSE
+      total 0.006616 against 0.005676 for QKeras (y +80 %); without those
+      45 events hls4ml matches QKeras. Fixed the same day: `dense_3` to
+      `fixed<11,3>` (same 8 fractional bits, range -4 to 4) in both
+      codesign notebooks. Rerun (synthesis 18 min 25 s): latency 1,
+      II=1, area 288,141.3 (+68.1, +0.02 %), register area 66.4, slack
+      16.45 ns; no sign flips, per-layer MSE vs QKeras 9.7e-6 at
+      `dense_3`, hls4ml test MSE total 0.005688 (QKeras 0.005676). See
+      "Results summary" under step 6.
 
 ### Batch flow, no GUI (2026-10-27)
 
@@ -388,7 +462,35 @@ license error was all that remained in the notebook. Do not repeat that.
 - [x] Record area, latency and throughput, both in the notebook output
       and somewhere plain-text (for example a results section here or in
       `../SUMMARY.md`).
-- [ ] Commit the notebooks with outputs, and `runs.csv`.
+- [x] Commit the notebooks with outputs, and `runs.csv` (2026-10-30).
+
+### Results summary (2026-10-28)
+
+Catapult 2024.2_2, io_parallel, Latency strategy, 25 ns clock, batch
+flow with `fully_parallel.tcl`. Area is the post-assignment total area
+score from `rtl.rpt`: um^2 for the TSMC 28 nm library (288,141.3 is
+about 0.29 mm^2), Catapult's own units for the FPGA (not comparable). Test
+MSE is the mean over x, y, cotB of the MSE against the labels, on the
+255,409 test events, as in `runs.csv`.
+
+| Model (fingerprint, training) | Target, weights | Latency / II | Area score | Slack | Test MSE QKeras / hls4ml |
+|---|---|---|---|---|---|
+| QMlp_Slim (`392456de`, 1000 + 2000, 2026-10-18) | TSMC 28 nm, programmable | 2 / 1 | 335,053.2 | 15.72 ns | 0.004649 / 0.004770 |
+| QMlp_Slim (same), pooling `fixed<16,8>` | Virtex-7 xc7vx485tffg1157-1, hardcoded | 5 / 1 | 265,913.0 | 3.43 ns | 0.004649 / 0.004770 |
+| QMlp_Slim (same), pooling `ufixed<6,2>` | Virtex-7 xc7vx485tffg1157-1, hardcoded | 5 / 1 | 266,031.0 | 3.51 ns | 0.004649 / 0.004770 |
+| QConv1D_Slim (`3eb13b90`, 1000 + 2000, 2026-10-28), `dense_3` `fixed<11,3>` | TSMC 28 nm, programmable | 1 / 1 | 288,141.3 | 16.45 ns | 0.005676 / 0.005688 |
+| Slide `SmtPxl.v1` (conv1d, May 2025) | TSMC 28 nm | 2 / 1 | 398,576.93 | 13.28 ns | n/a (other model and data) |
+| QMlp_Slim (`392456de`, retrain 2026-10-28) | not run yet | | | | 0.004667 / not run |
+| QConv2D_Slim (`392456de`, 2026-10-30) | not run yet | | | | 0.007418 / not run |
+
+The QMlp_Slim rows are for the model trained 2026-10-18 (backed up in
+`smart-pixels/backups/QMlp_Slim-392456de-2026-10-18/`, with the
+reports). QMlp_Slim was retrained 2026-10-28 (part 1 best val 27.5634,
+part 2 best val 26.4647, QKeras test MSE 0.004667; backed up 2026-10-29);
+rerun its Catapult rows on the new model. Results files:
+`smart-pixels-ml/processed_parquets/dataset_2s_roi/test_dataset_2s_48x192_50x12P5_roi/2bit_optimized/`
+(`-vars` QKeras, `-hls4ml-vars` ASIC, `-hls4ml-xc7vx485tffg1157-1-vars`
+Virtex-7).
 
 ## Things to watch
 
@@ -401,11 +503,19 @@ license error was all that remained in the notebook. Do not repeat that.
   `two_bit_optimization.ipynb` with QConv1D_Slim stops with
   PermissionError at `shutil.rmtree` in `train.py` before deleting
   anything. To retrain on purpose, `chmod -R u+w` them first.
-  QMlp_Slim (`392456de`) is not write-protected: it is to be retrained
-  from scratch (1000 + 2000 epochs, decided 2026-10-28) to get part 1
-  back. The current model (part 2 only, behind all QMlp_Slim Catapult
-  results so far) and the key Catapult reports are backed up in
+  QMlp_Slim (`392456de`) retrain (1000 + 2000 epochs, 2026-10-28
+  09:35 to 23:03, test MSE total 0.004667) is protected the same way:
+  backup in `smart-pixels/backups/QMlp_Slim-392456de-2026-10-28/`, and
+  its two checkpoint folders and `npy/2t-QMlp_Slim-392456de-*` files are
+  read-only. The Oct 18 model (part 2 only, behind all QMlp_Slim
+  Catapult results so far) and its Catapult reports stay in
   `smart-pixels/backups/QMlp_Slim-392456de-2026-10-18/`.
+  QConv2D_Slim (`392456de`, 1000 + 2000 epochs, 2026-10-29 07:26 to
+  2026-10-30 02:00, part 1 best val 44.2574, part 2 best val 42.3299,
+  QKeras test MSE total 0.007418) is protected the same way: backup in
+  `smart-pixels/backups/QConv2D_Slim-392456de-2026-10-30/`, checkpoint
+  folders and `npy/2t-QConv2D_Slim-392456de-*` read-only. Not yet run
+  through Catapult.
 
 - Training runs on the CPU, not the GPU. The first code cell of both
   notebooks sets `CUDA_VISIBLE_DEVICES = "-1"` (added in `6cb1879`),
@@ -454,7 +564,9 @@ work (it only has 2023 to early 2025 SmartPixels hls4ml repos).
 ### Models already trained here (ROI dataset)
 
 In `smart-pixels/weights/dataset_2s_roi_weights/`: `Conv1D_Slim`
-(`3eb13b90`), `Conv2D_Slim`, `Mlp_Slim` and `QMlp_Slim` (`392456de`).
+(`3eb13b90`), `Conv2D_Slim`, `Mlp_Slim`, `QMlp_Slim` and `QConv2D_Slim`
+(`392456de`), and `QConv1D_Slim` (`3eb13b90`); the three quantized Slim
+models are the full 1000 + 2000 epoch runs of 2026-10-28 to 30.
 `Conv1D_Slim` is the non-quantized version of the target, so it cannot
 go through hls4ml as is.
 
