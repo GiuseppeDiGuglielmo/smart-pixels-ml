@@ -40,6 +40,7 @@ proc hls4ml_fully_parallel { {top ""} {max_depth 12} } {
 
   set n_rsc 0
   set n_unroll 0
+  set n_pipe_off 0
   foreach proc_path $procs {
     # Arrays of the process to registers
     foreach p [directive get $proc_path/*:rsc/MAP_TO_MODULE -match glob -ret path -checkpath 0] {
@@ -55,14 +56,25 @@ proc hls4ml_fully_parallel { {top ""} {max_depth 12} } {
     for {set d 1} {$d <= $max_depth} {incr d} {
       set pat $pat/*
       foreach p [directive get $pat/UNROLL -match glob -ret path -checkpath 0] {
+        # 2026-10-30: nnet::linear (QKeras quantized_bits output activation)
+        # is pipelined in the source (hls_pipeline_init_interval 1). Unrolling
+        # it without removing that pipeline fails at go architect with LOOP-21
+        # "Cannot pipeline a fully unrolled loop" (QConv2D_Slim). Skipping the
+        # unroll instead leaves a rolled, pipelined loop of 80 iterations
+        # inside main (latency 81). Set by hand in the GUI, latency 2: drop the
+        # pipeline (II 0), then unroll.
+        if { [string match {*nnet::linear<*} $p] } {
+          directive set [file dirname $p] -PIPELINE_INIT_INTERVAL 0
+          incr n_pipe_off
+        }
         directive set [file dirname $p] -UNROLL yes
         incr n_unroll
       }
     }
   }
 
-  logfile message "hls4ml_fully_parallel: [llength $procs] process(es), $n_rsc array(s) to registers, main loop II=1, $n_unroll loop(s) unrolled\n" info
-  puts "hls4ml_fully_parallel: [llength $procs] process(es), $n_rsc array(s) to registers, main loop II=1, $n_unroll loop(s) unrolled"
+  logfile message "hls4ml_fully_parallel: [llength $procs] process(es), $n_rsc array(s) to registers, main loop II=1, $n_unroll loop(s) unrolled, $n_pipe_off source pipeline(s) removed\n" info
+  puts "hls4ml_fully_parallel: [llength $procs] process(es), $n_rsc array(s) to registers, main loop II=1, $n_unroll loop(s) unrolled, $n_pipe_off source pipeline(s) removed"
 }
 
 hls4ml_fully_parallel

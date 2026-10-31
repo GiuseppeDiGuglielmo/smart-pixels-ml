@@ -1,8 +1,9 @@
-# Plan: QConv1D_Slim area with Catapult 2024.2_2
+# Plan: QMlp, QConv1D and QConv2D Slim area with Catapult 2024.2_2
 
-Goal: train the quantized conv1d model (`QConv1D_Slim`) on the ROI
-dataset and get its HLS area from Catapult 2024.2_2, the release behind
-the May 2025 slides. The whole flow runs in VS Code: notebooks, terminal
+Goal: train the quantized Slim models (`QMlp_Slim`, `QConv1D_Slim`,
+`QConv2D_Slim`) on the ROI dataset and get their HLS area from Catapult
+2024.2_2, the release behind the May 2025 slides. Done for all three
+(ASIC) on 2026-10-30, see "Where things stand". The whole flow runs in VS Code: notebooks, terminal
 and Claude. (Catapult 2026.3_1 was tried first, see "Switch back to
 2024.2_2" below.)
 
@@ -31,27 +32,42 @@ QConv2D_Slim is clearly the least accurate (x 0.0083, y 0.0033, cotB
 QMlp 29 s / 10 s, QConv1D 28 s / 10 s, QConv2D 33 s / 17 s (part 1 /
 part 2).
 
-Catapult 2024.2_2 results exist only for QMlp_Slim (old Oct 18 model)
-and QConv1D_Slim, see "Results summary (2026-10-28)" under step 6.
+Catapult 2024.2_2 results (ASIC, TSMC 28 nm) now exist for all three
+models, run from `codesign_catapult.ipynb` on 2026-10-30: see "Results
+summary (2026-10-30)" under step 6. Virtex-7 is still the Oct 18 QMlp.
+
+| Model | Latency / II | Area score | Slack | Test MSE QKeras / hls4ml |
+|---|---|---|---|---|
+| QMlp_Slim | 2 / 1 | 335,053.2 | 15.72 ns | 0.004668 / 0.004770 |
+| QConv1D_Slim | 1 / 1 | 288,141.3 | 16.45 ns | 0.005676 / 0.005688 |
+| QConv2D_Slim | 2 / 1 | 606,779.2 | 14.33 ns | 0.007419 / 0.008012 |
+
+Everything from these runs (projects, executed notebooks, parquets,
+directives) is in the write-protected backup
+`smart-pixels/backups/Catapult_ASIC_QMlp_QConv1D_QConv2D-2026-10-30/`.
+Uncommitted at the time of writing: `PLAN.md`, `fully_parallel.tcl`
+(`nnet::linear` fix) and `codesign_catapult.ipynb` (`MODEL_TYPE` environment variable, `run_tag`,
+`archive_existing`, nothing overwritten).
 
 Next steps, in order (codesign phase):
 
-- [ ] Rerun `codesign_catapult.ipynb` (ASIC, TSMC 28 nm) and
-      `codesign_catapult_efpga.ipynb` (Virtex-7) for the new QMlp_Slim
-      (`model_type = 'QMlp_Slim'`) and update the results table; the
-      current QMlp rows are for the Oct 18 model. Then delete
-      `smart-pixels/backups/QMlp_Slim-392456de-2026-10-18/` (it is the
-      only copy of the old Catapult reports, so only after the table is
-      updated).
-- [ ] Run `codesign_catapult.ipynb` for QConv2D_Slim. Not tried yet.
-      Check first: the precision settings in cell 53 use auto-numbered
-      Keras layer names (`input_1`, `average_pooling2d`, `q_dense_2`),
-      but a freshly built model has `input_2`, `average_pooling2d_1`,
-      `q_dense_5` (check with `model.summary()`); check the QKeras vs
-      hls4ml sign flips on the output layer (QConv1D `dense_3` overflowed
-      with `fixed<10,2>`); `QSeparableConv2D` goes through
-      `nnet_sepconv2d_latency.h`, and the fully unrolled 14x14
-      convolutions will probably make synthesis slow and large.
+- [x] `codesign_catapult.ipynb` (ASIC, TSMC 28 nm) rerun for the new
+      QMlp_Slim (2026-10-30): same design and area as the Oct 18 model.
+- [ ] `codesign_catapult_efpga.ipynb` (Virtex-7) for the new QMlp_Slim
+      (`model_type = 'QMlp_Slim'`); its rows are still for the Oct 18
+      model. Then delete
+      `smart-pixels/backups/QMlp_Slim-392456de-2026-10-18/` (it holds
+      the only copy of the old Catapult reports, so only after the
+      Virtex-7 rows are updated).
+- [x] `codesign_catapult.ipynb` for QConv2D_Slim (2026-10-30): latency
+      2, II=1, area 606,779.2, slack 14.33 ns, see "Results summary
+      (2026-10-30)". Needed a fix in `fully_parallel.tcl` (the
+      `nnet::linear` loop, see below). The cell 53 layer names did not
+      matter: the notebook ran top to bottom without changing them.
+- [ ] QConv2D_Slim hls4ml vs QKeras: test MSE 0.008012 against 0.007419
+      (+8 %; y +22 %, cotB +9 %), no sign flips checked yet. The
+      per-layer MSE already starts at `q_dense` (1.7e-4) and ends at
+      `q_dense_2` 6.8e-4 (`fixed<10,4>`); look at the dense precisions.
 - [ ] Optional, not approved: pruning (post-training 50 percent sparsity
       keeps test MSE 0.005259 for QMlp, 60 percent gives 0.0165), as a
       `prune_sparsity` option in the FPGA notebook, then fine-tuning;
@@ -66,10 +82,21 @@ coordinates; the NN takes 512 values x 2 bits = 1,024 bits. Weights
 (bits): QMlp 2,096 x 8 = 16,768 plus 83 biases; QConv1D 2,604 weights
 = 20,592 bits plus 45 biases. Catapult needs the VPN for the license
 (`lmutil lmstat -c $LM_LICENSE_FILE -f CatapultUltra_c`). Headless
-notebook run: `source envsetup.sh`, then `~/catapult_venvs/2024.2_2/bin/python
--m jupyter nbconvert --to notebook --execute --inplace
---ExecutePreprocessor.kernel_name=catapult-2024.2_2
---ExecutePreprocessor.timeout=-1 <notebook>`.
+notebook run, one model at a time (2026-10-30): `source envsetup.sh`, then
+from the repo root `MODEL_TYPE=<M> ~/catapult_venvs/2024.2_2/bin/python -m
+jupyter nbconvert --to notebook --execute --ExecutePreprocessor.kernel_name=catapult-2024.2_2
+--ExecutePreprocessor.timeout=-1 --output-dir codesign_runs --output
+codesign_catapult_<M> codesign_catapult.ipynb`. `MODEL_TYPE` (cell 7)
+overrides `model_type`, so there is one notebook and no copy; without
+`--inplace` the executed notebook goes to `codesign_runs/` (gitignored)
+and `codesign_catapult.ipynb` stays clean. Not tried yet: the 2026-10-30
+runs used per-model copies (since deleted, they are in the backup).
+Run it in the background and read
+`<project>/catapult.log` (the notebook output only appears at the end).
+Times: QMlp 6 min, QConv1D 12 min, QConv2D 1 h 46 min (about 12 min of
+Python before Catapult starts); the notebook kernel uses about 35 GB of
+RAM. Check the license first (VPN). Rerunning a model renames its old
+project instead of deleting it (about 1.3 to 2 GB each).
 
 ### Switch back to 2024.2_2 (2026-10-19)
 
@@ -154,7 +181,7 @@ QMlp_Slim progress:
       1.2e-4 at `dense_3` (fixed-point rounding; the model's own test
       MSE is about 0.005). `build_prj.tcl` gets the TSMC library path
       through `asiclibspath`.
-- [ ] Steps 5 and 6 with 2024.2_2. Expect a parallel design like the
+- [x] Steps 5 and 6 with 2024.2_2 (done, see below). Expect a parallel design like the
       slide (latency of a few cycles, throughput 1 cycle).
       First attempt (2026-10-19, `catapult -shell`, `Synth = True`, no
       loop directives): sequential design, `allocate` ran 8.6 h without
@@ -251,14 +278,16 @@ the analysis path.
 
 ## 2. Short test run of training
 
+Done for all three models (2026-10-17 to 2026-10-30); kept for a new model.
+
 `two_bit_optimization.ipynb`, Parameters cell (cell 8):
 
-- [ ] `model_type='QConv1D_Slim'`
-- [ ] Keep `use_roi=True`, `use_roi_labels=True`, `roi_dataset='2s'`,
+- [x] `model_type='QConv1D_Slim'`
+- [x] Keep `use_roi=True`, `use_roi_labels=True`, `roi_dataset='2s'`,
       `tfrecords_exist_2s_roi=True`. The TFRecords are already in
       `.../sim_out/dataset_2s_48x192_50x12P5_parquets/TFR_files/2t/`.
-- [ ] Temporarily set `epochs1=2`, `epochs2=2`.
-- [ ] Restart the kernel and run all cells. The notebook only works when
+- [x] Temporarily set `epochs1=2`, `epochs2=2`.
+- [x] Restart the kernel and run all cells. The notebook only works when
       run top to bottom (see the README).
 
 This catches path, package and shape errors in minutes. Afterwards,
@@ -266,8 +295,10 @@ delete the row the test run added to `runs.csv`.
 
 ## 3. Full training
 
-- [ ] Set `epochs1=200`, `epochs2=200`, then restart and run all.
-- [ ] Note `fingerprint2` from the output (it is also in the new
+Done for all three models (1000 + 2000 epochs, see the table at the top; the steps below say 200 + 200, the first plan). Training now needs `chmod` first, see "Things to watch".
+
+- [x] Set `epochs1=200`, `epochs2=200`, then restart and run all.
+- [x] Note `fingerprint2` from the output (it is also in the new
       `runs.csv` row).
 
 Outputs:
@@ -284,16 +315,18 @@ the full run, and the full run replaces them.
 
 ## 4. Generate the HLS project
 
+Done for all three models (2026-10-30), through `codesign_catapult.ipynb` run top to bottom.
+
 `codesign_catapult.ipynb`:
 
-- [ ] `model_type = 'QConv1D_Slim'` (cell 7).
-- [ ] If `fingerprint2` is not `3eb13b90`, update `'QConv1D_Slim'` in
+- [x] `model_type = 'QConv1D_Slim'` (cell 7).
+- [x] If `fingerprint2` is not `3eb13b90`, update `'QConv1D_Slim'` in
       `fingerprint_choices` (cell 18). The cell prints which models it
       finds and stops if the selected one is missing.
-- [ ] Run up to and including "Model synthesis". The precision overrides
+- [x] Run up to and including "Model synthesis". The precision overrides
       for `QConv1D_Slim` are already in the "Bit-precision" cell:
       input `ufixed<2,2>`, pooling `fixed<16,8>`, `dense_3` `fixed<10,2>`.
-- [ ] Check the QKeras vs hls4ml comparison (per-layer MSE, parity
+- [x] Check the QKeras vs hls4ml comparison (per-layer MSE, parity
       plots) before spending time on synthesis.
 
 This writes `SmtPxl_QConv1D_Slim_io_parallel_Latency_pw_hls4ml_prj/`.
@@ -321,7 +354,7 @@ catapult -f build_prj.tcl    # GUI, no -shell
 - [x] Write down every directive set in the GUI (QMlp_Slim: listed in
       "QMlp_Slim Catapult results" below, saved in
       `catapult_directives/QMlp_Slim.tcl`).
-- [ ] Same for QConv1D_Slim.
+- [x] Same for QConv1D_Slim (batch flow, below), and QConv2D_Slim.
       Smoke test 2026-10-27 with a 2 + 2 epoch model (fingerprint
       `3eb13b90`), batch flow, no GUI: `fully_parallel.tcl` mapped 19
       arrays, unrolled 49 loops; synthesis 9 min 7 s. Latency 1 cycle,
@@ -480,14 +513,69 @@ MSE is the mean over x, y, cotB of the MSE against the labels, on the
 | QMlp_Slim (same), pooling `ufixed<6,2>` | Virtex-7 xc7vx485tffg1157-1, hardcoded | 5 / 1 | 266,031.0 | 3.51 ns | 0.004649 / 0.004770 |
 | QConv1D_Slim (`3eb13b90`, 1000 + 2000, 2026-10-28), `dense_3` `fixed<11,3>` | TSMC 28 nm, programmable | 1 / 1 | 288,141.3 | 16.45 ns | 0.005676 / 0.005688 |
 | Slide `SmtPxl.v1` (conv1d, May 2025) | TSMC 28 nm | 2 / 1 | 398,576.93 | 13.28 ns | n/a (other model and data) |
-| QMlp_Slim (`392456de`, retrain 2026-10-28) | not run yet | | | | 0.004667 / not run |
-| QConv2D_Slim (`392456de`, 2026-10-30) | not run yet | | | | 0.007418 / not run |
+| QMlp_Slim (`392456de`, retrain 2026-10-28) | TSMC 28 nm, programmable | 2 / 1 | 335,053.2 | 15.72 ns | 0.004668 / 0.004770 |
+| QConv2D_Slim (`392456de`, 2026-10-30) | TSMC 28 nm, programmable | 2 / 1 | 606,779.2 | 14.33 ns | 0.007419 / 0.008012 |
 
-The QMlp_Slim rows are for the model trained 2026-10-18 (backed up in
+### Results summary (2026-10-30)
+
+All three models run from `codesign_catapult.ipynb` (one executed copy
+per model, run on copies of the notebook; their executed notebooks are in the backup), Catapult
+2024.2_2, 25 ns clock, TSMC 28 nm, programmable weights, batch flow with
+`fully_parallel.tcl`. Area is the post-assignment total area score
+(`rtl.rpt`). Test MSE is the mean over x, y, cotB on the 255,409 test
+events, computed from the `-vars` (QKeras) and `-hls4ml-vars` parquets.
+
+| Model | Latency / II | Area score | Register area | Slack | Real ops | Test MSE QKeras / hls4ml | Max per-layer MSE vs QKeras |
+|---|---|---|---|---|---|---|---|
+| QMlp_Slim | 2 / 1 | 335,053.2 | 3,089.0 | 15.72 ns | 5,996 | 0.004668 / 0.004770 | 1.2e-4 (`dense_3`) |
+| QConv1D_Slim | 1 / 1 | 288,141.3 | 66.4 | 16.45 ns | 9,644 | 0.005676 / 0.005688 | 9.7e-6 (`dense_3`) |
+| QConv2D_Slim | 2 / 1 | 606,779.2 | 1,351.0 | 14.33 ns | 37,052 | 0.007419 / 0.008012 | 6.8e-4 (`q_dense_2`) |
+
+QMlp_Slim and QConv1D_Slim give exactly the earlier area and timing:
+the weights are programmable, so the area does not depend on the
+trained values (the Oct 18 and Oct 28 QMlp models have the same
+numbers). QConv2D_Slim is about twice the area of QConv1D_Slim and the
+least accurate. Its Catapult run took 1 h 46 min (`allocate` 49 min,
+`instance` 34 min); QMlp 4 min, QConv1D 12 min with the notebook.
+
+QConv2D_Slim, `nnet::linear` (`q_activation_2`): its loop has
+`#pragma hls_pipeline_init_interval 1` in `nnet_activation.h`.
+`fully_parallel.tcl` set `-UNROLL yes` on it, and `go architect` failed
+with LOOP-21 "Cannot pipeline a fully unrolled loop" (first attempt,
+8 min). Skipping that loop gave a rolled, pipelined loop of 80
+iterations inside `main`: latency 81 (second attempt, stopped after
+`allocate`). The directives set by hand in the GUI had
+`-PIPELINE_INIT_INTERVAL 0` and then `-UNROLL yes` on it: latency 2,
+II=1, and the script now does the same (rerun 2026-10-30: identical to
+the GUI run, 606,779.2, slack 14.33 ns, 37,052 real operations). The
+GUI run set no register mapping for the arrays; the script maps 22 to
+registers, with the same area.
+
+Nothing is overwritten any more (2026-10-30): `codesign_catapult.ipynb`
+renames the previous project to `..._<mtime>_hls4ml_prj` and the old
+`-hls4ml-vars.parquet` to `...-vars-<mtime>.parquet` instead of deleting
+them, and tags the files in the repo root with the model (`run_tag`).
+Archived projects: QMlp 20261027-083144, QConv1D 20261028-110630, and
+for QConv2D 20261030-112151 (LOOP-21 failure) and 20261030-161837 (the
+GUI run, `SmtPxl_QConv2D_Slim_prj_1`, and the latency 81 solution).
+They are about 1.3 GB each and can be deleted when no longer needed.
+
+Backup (2026-10-30, 9.8 GB, write-protected, checksums verified):
+`smart-pixels/backups/Catapult_ASIC_QMlp_QConv1D_QConv2D-2026-10-30/`.
+It holds the three full Catapult projects, the GUI run of QConv2D_Slim,
+the executed per-model notebooks, `catapult_directives/`, the `-vars` and
+`-hls4ml-vars` parquets and the tagged files of the repo root. The README
+there has the contents and the restore steps. The run script overwrites
+the executed notebooks and the tagged root files on a rerun;
+the copies in the backup do not change.
+
+The QMlp_Slim rows above for 2026-10-18 and the Virtex-7 rows are for
+the model trained 2026-10-18 (backed up in
 `smart-pixels/backups/QMlp_Slim-392456de-2026-10-18/`, with the
 reports). QMlp_Slim was retrained 2026-10-28 (part 1 best val 27.5634,
 part 2 best val 26.4647, QKeras test MSE 0.004667; backed up 2026-10-29);
-rerun its Catapult rows on the new model. Results files:
+the ASIC row was rerun on the new model (see the next summary), the
+Virtex-7 rows were not. Results files:
 `smart-pixels-ml/processed_parquets/dataset_2s_roi/test_dataset_2s_48x192_50x12P5_roi/2bit_optimized/`
 (`-vars` QKeras, `-hls4ml-vars` ASIC, `-hls4ml-xc7vx485tffg1157-1-vars`
 Virtex-7).
@@ -514,9 +602,16 @@ Virtex-7).
   2026-10-30 02:00, part 1 best val 44.2574, part 2 best val 42.3299,
   QKeras test MSE total 0.007418) is protected the same way: backup in
   `smart-pixels/backups/QConv2D_Slim-392456de-2026-10-30/`, checkpoint
-  folders and `npy/2t-QConv2D_Slim-392456de-*` read-only. Not yet run
-  through Catapult.
+  folders and `npy/2t-QConv2D_Slim-392456de-*` read-only. Run through
+  Catapult on 2026-10-30.
 
+- `codesign_catapult_efpga.ipynb` still deletes its previous project
+  (`shutil.rmtree` in the "Remove the previous project" cell) and
+  overwrites its `-xc7vx485tffg1157-1-vars` parquet; only
+  `codesign_catapult.ipynb` archives (2026-10-30). The Oct 18 Virtex-7
+  QMlp projects (`..._efpga_hls4ml_prj`, `..._efpga_pool16_8_hls4ml_prj`)
+  are not in the 2026-10-30 backup: copy them before rerunning it, or
+  port `archive_existing` first.
 - Training runs on the CPU, not the GPU. The first code cell of both
   notebooks sets `CUDA_VISIBLE_DEVICES = "-1"` (added in `6cb1879`),
   so the GPU check in step 1 passes only because it runs before that
