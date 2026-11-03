@@ -13,7 +13,7 @@ inputs are now 2-bit ROI data instead of 4-bit 13x21 data, and the
 precisions are different. See `../SUMMARY.md` for where the slide came
 from.
 
-## Status (updated 2026-10-30)
+## Status (updated 2026-11-03)
 
 ### Where things stand (2026-10-30), start here
 
@@ -35,6 +35,8 @@ part 2).
 Catapult 2024.2_2 results (ASIC, TSMC 28 nm) now exist for all three
 models, run from `codesign_catapult.ipynb` on 2026-10-30: see "Results
 summary (2026-10-30)" under step 6. Virtex-7 is still the Oct 18 QMlp.
+Genus synthesis of the same RTL (2026-11-03) is under "Genus logic
+synthesis (2026-11-03)" in step 6.
 
 | Model | Latency / II | Area score | Slack | Test MSE QKeras / hls4ml |
 |---|---|---|---|---|
@@ -75,6 +77,15 @@ Next steps, in order (codesign phase):
 - [ ] Optional: validation set equals the test set in the training code
       (test MSE slightly optimistic); input registers (inputs are not
       registered, outputs are).
+- [x] Genus logic synthesis of the three Catapult RTLs, slow and
+      typical corner (2026-11-03): see "Genus logic synthesis
+      (2026-11-03)" under step 6. Slow-corner area is 3.5 to 8.2 %
+      above the Catapult area, all meet 25 ns.
+- [ ] Check the Genus netlists against the RTL (gate-level simulation
+      with the cocotb testbenches in the VIAS repository, or Conformal
+      equivalence) before quoting power.
+- [ ] Optional: fixed-weight versions (weight and bias ports tied to the
+      trained values) for a realistic area.
 
 Facts for the codesign work: ROI finder input is 48x192x2x2 = 36,864
 bits, its output is a 16x16x2x2 = 1,024-bit window plus 14-bit
@@ -579,6 +590,78 @@ Virtex-7 rows were not. Results files:
 `smart-pixels-ml/processed_parquets/dataset_2s_roi/test_dataset_2s_48x192_50x12P5_roi/2bit_optimized/`
 (`-vars` QKeras, `-hls4ml-vars` ASIC, `-hls4ml-xc7vx485tffg1157-1-vars`
 Virtex-7).
+
+### Genus logic synthesis (2026-11-03)
+
+The Catapult RTL of the three models (2026-10-30 runs) is synthesized
+with Cadence Genus 23.1 in the VIAS repository, not here:
+`fasic-beast1.fnal.gov:/fasic_home/gdg/research/projects/VIAS/VIAS_VC9_VIRTEX_2025`
+(RTL in `hls/rtl/`, flow in `impl/syn/`, results also in
+`impl/README.md`). Medium effort, 8 CPUs (one Genus_Synthesis license,
+so one run at a time), 25 ns clock, 2 ns input and output delays,
+`BUFFD1BWP30P140` driving cell, 0.02 pF load, weights as input ports.
+
+Slow corner `ssg0p81v125c` (Catapult's corner, the one to report):
+
+| Model | Slack HLS / Syn | HLS area | Syn cell area | Syn vs HLS | Run time |
+|---|---|---|---|---|---|
+| QMlp_Slim | 15.72 / 9.53 ns | 335,053.2 | 357,527.3 | +6.7 % | 7 h 37 min |
+| QConv1D_Slim | 16.45 / 8.22 ns | 288,141.3 | 311,658.6 | +8.2 % | 7 h 17 min |
+| QConv2D_Slim | 14.33 / 7.90 ns | 606,779.2 | 628,048.1 | +3.5 % | 13 h 15 min |
+
+Typical corner `tt0p9v25c`, for power (Genus default activity, so
+indicative only): QMlp_Slim 360,229 um^2, 11.18 ns, 23.0 mW (leakage
+1.23); QConv1D_Slim 304,226, 10.52 ns, 19.6 mW (1.07); QConv2D_Slim
+627,275, 11.72 ns, 36.7 mW (2.23). At the slow corner leakage is about
+half the total (125 C), so slow-corner power is not quoted.
+
+Synthesis slack is lower than Catapult's because Catapult does not model
+the IO delays, driving cell and load. High effort was dropped: medium
+already leaves 8 ns or more of slack. QConv2D_Slim needs
+`AUTO_PARTITION=true` (now the Makefile default for it), otherwise its
+core maps on a single worker. Run times are dominated by that one large
+core chunk.
+
+Working on the VIAS repository (state 2026-11-03):
+
+- Git: `main` pushed to
+  `git@github.com:Fermilab-Microelectronics/VIAS_VC9_VIRTEX_2025.git`
+  (HEAD `41be6bd`). Use `scl enable rh-git218 "git ..."` on fasic-beast1
+  (the default git is too old). Git LFS is disabled on that GitHub
+  repository, so the RTL is stored as normal files; do not add LFS
+  again. The pre-rewrite history (when the RTL was in LFS) is backed up
+  read-only in
+  `/fasic_home/gdg/research/projects/VIAS/backups/VIAS_VC9_VIRTEX_2025-pre-lfs-drop-20261103/`;
+  delete it when no longer needed.
+- Access: from this machine, `kinit gdg@FNAL.GOV` (the ticket lasts
+  about a day) and the VPN ("No route to host" means the VPN is down).
+- Run: `cd impl/syn; make syn-genus IMPLEMENTATION=<model>` (defaults:
+  slow corner, medium effort, AUTO_PARTITION true only for QConv2D_Slim;
+  `make syn-help`). Needs `LM_LICENSE_FILE=1717@fasic-admin1.fnal.gov:5280@fasic-admin1.fnal.gov:26745@fasic-admin1.fnal.gov:27001@fasic-admin1.fnal.gov:27000@fasic-admin1.fnal.gov`
+  and `CDS_SKIP_OS_CHECK_ON_STARTUP=1`. Launch detached
+  (`setsid nohup ... &`, then `ssh -n` with `timeout`), one run at a
+  time: there is a single Genus_Synthesis license, and 8 CPUs is the
+  most one license allows. Expect 7 to 13 h per model.
+- Never edit `syn_genus.tcl`, the Makefile or a running queue script in
+  place while a run is alive: Genus and bash read them incrementally,
+  and an in-place edit killed a 13 h run. Write a new file and `mv` it
+  over. Do not `pkill -f`; kill by PID only.
+- Run folders (not in git, about 1.1 GB) in `impl/syn`:
+  `genus_SmtPxl_<model>_v0_<corner>_medium_<timestamp>/` for the six
+  runs above (three models, ssg and tt). The ssg ones are the reference.
+- Another agent works in the same checkout on cocotb testbenches and
+  ROI finder sources (untracked `src/roi_nn/`, `vrf/COCOTB/...`,
+  `CLAUDE.md`, `cocotb_venv/`); leave its files alone, and gitignore
+  `CLAUDE.md` and `cocotb_venv/` once it is done.
+
+Next steps for the synthesized designs, in order: check the netlists
+against the RTL (gate-level simulation with the cocotb testbenches and
+the TSMC cell Verilog models, or Conformal equivalence if licensed);
+fixed-weight versions (weight and bias ports tied to the trained values)
+for a realistic area; typical-corner power on the ssg netlists (load
+the netlist with the tt library, minutes per model, needs the Genus
+license). Not needed now: high effort, fast corner or hold, place and
+route.
 
 ## Things to watch
 
