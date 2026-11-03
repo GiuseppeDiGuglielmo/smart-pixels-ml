@@ -664,6 +664,51 @@ the netlist with the tt library, minutes per model, needs the Genus
 license). Not needed now: high effort, fast corner or hold, place and
 route.
 
+Slide table (2026-11-03; TSMC 28 nm, slow corner `ssg0p81v125c`,
+clk 25 ns; Catapult 2024.2_2, Genus 23.1 medium effort; dataset
+`dataset_2s_48x192_50x12P5`, 2s ROI). Weights are input ports;
+synthesis adds IO delays, driving cell and load, which Catapult does
+not model.
+
+| Model | Latency / II | Slack HLS / Syn (ns) | HLS area (um^2) | Syn area (um^2) | Syn vs HLS | Test MSE QKeras / hls4ml |
+|---|---|---|---|---|---|---|
+| QMlp_Slim | 2 / 1 | 15.72 / 9.53 | 335,053.2 (0.34 mm^2) | 357,527.3 (0.36 mm^2) | +6.7 % | 0.004668 / 0.004770 |
+| QConv1D_Slim | 1 / 1 | 16.45 / 8.22 | 288,141.3 (0.29 mm^2) | 311,658.6 (0.31 mm^2) | +8.2 % | 0.005676 / 0.005688 |
+| QConv2D_Slim | 2 / 1 | 14.33 / 7.90 | 606,779.2 (0.61 mm^2) | 628,048.1 (0.63 mm^2) | +3.5 % | 0.007419 / 0.008012 |
+
+QMlp_Slim QKeras MSE: use 0.004668 (the 2026-10-28 retrain that the
+Catapult and Genus numbers come from), not 0.004649 (the 2026-10-18
+model).
+
+Related records: the Catapult handoff document (setup, port interface,
+bit order and packing, Catapult results, integration notes) is
+`hls/rtl/README.md` in the VIAS repository, also published as
+https://claude.ai/artifact/Dyb3Mnd1iekkhT9SUu3e2S (written before the
+Genus runs, so it has no synthesis results). The commit-message skill
+is installed on fasic-beast1 in `~/.claude/skills/commit-message`.
+
+Genus lessons (2026-10-31 to 2026-11-03):
+
+- Genus 23.1 rejects `write_design -innovus` (TUI-64), so the first
+  runs wrote no netlist. The script now writes the netlist and SDC
+  first, then `write_design` without `-innovus` (a design snapshot).
+- One Genus_Synthesis license allows 8 super-threading servers; more
+  need Genus_CPU_Opt, which the site lacks (ST-116). If the worker crash
+  loop (ST-113) appears, lower `MAX_CPUS_PER_SERVER` to 4.
+- Run time is set by the one chunk holding the Catapult core (about 15
+  to 16 min per MB of chunk at the typical corner, 30 to 50 % slower at
+  the slow corner); the other chunks finish in minutes.
+  `AUTO_PARTITION=true` split off only about 25 % of QConv2D_Slim's
+  core.
+- High effort barely helps that chunk (QMlp_Slim 6 h 44 min against
+  5 h 45 min at medium). The only high-effort run was lost after 13 h
+  to an in-place edit of `syn_genus.tcl`, so there is no high-effort
+  area.
+- To queue runs safely: one queue script per batch, which waits for the
+  previous `make` PID and logs to its own file; to change a queue,
+  start a new script and kill only the old loop's bash PID. The queue
+  scripts and logs were deleted when the runs ended.
+
 ## Things to watch
 
 - QConv1D_Slim full training (1000 + 2000 epochs, fingerprint
